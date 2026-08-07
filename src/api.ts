@@ -37,6 +37,7 @@ export interface PublicRaffle {
   prizeAmount: number;
   winner: WinnerInfo | null;
   drawing: boolean;
+  drawDate?: number;
   exists: boolean;
   claimPath: string | null;
 }

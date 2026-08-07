@@ -20,16 +20,26 @@ export interface Raffle {
   currency: string;
   ticketCount: number;
   createdAt: number;
+  drawsAt: number; // draw date: the deadline draw fires here if the raffle isn't sold out first
   sold: Sale[];
   winner: { number: number; email: string; name?: string; token: string; at: number; paid?: boolean } | null;
   drawing: boolean; // true while a draw is scheduled/in progress
   sellsAt: number; // timestamp when the raffle filled up
 }
 
+const raffleDays = Number(process.env.RAFFLE_DAYS ?? 6);
+// How long a raffle runs: the draw fires automatically when the raffle is sold
+// out OR when this deadline is reached, whichever comes first. Overridable via
+// RAFFLE_DAYS.
+const RAFFLE_DURATION_MS = (Number.isFinite(raffleDays) && raffleDays > 0 ? raffleDays : 6) * 24 * 3_600_000;
+
 const RAFFLE_KEY = "raffle:current";
 
 let current: Raffle | null = null;
 let drawTimer: ReturnType<typeof setTimeout> | null = null;
+// Timer armed at the raffle's draw date (drawsAt). Re-armed whenever a raffle
+// is created or loaded so the deadline draw fires even with zero further sales.
+let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
 
 type Drawer = (drawn: Raffle) => void;
 let onDraw: Drawer | null = null;
@@ -75,6 +85,7 @@ function emptyRaffle(): Raffle {
     currency: "BRL",
     ticketCount: 0,
     createdAt: Date.now(),
+    drawsAt: Date.now() + RAFFLE_DURATION_MS,
     sold: [],
     winner: null,
     drawing: false,
@@ -101,6 +112,7 @@ export async function loadRaffleFromDb(): Promise<Raffle | null> {
   } catch (err) {
     console.error("Failed to read raffle from Turso", err);
   }
+  if (current) armDeadlineTimer(current);
   return current;
 }
 
@@ -119,9 +131,10 @@ export function createRaffle(input: {
   ticketCount: number;
 }): Raffle {
   reserved.clear();
+  const now = Date.now();
   const r: Raffle = {
     ...emptyRaffle(),
-    id: String(Math.floor(Date.now() / 1000)),
+    id: String(Math.floor(now / 1000)),
     title: input.title,
     titlePt: input.titlePt?.trim() || "",
     prize: input.prize,
@@ -129,9 +142,12 @@ export function createRaffle(input: {
     price: input.price,
     currency: input.currency,
     ticketCount: input.ticketCount,
+    createdAt: now,
+    drawsAt: now + RAFFLE_DURATION_MS, // the draw date: creation + 6 days
   };
   current = r;
   persist(r);
+  armDeadlineTimer(r);
   return r;
 }
 
@@ -214,8 +230,18 @@ export function isFull(r: Raffle): boolean {
   return r.ticketCount > 0 && r.sold.length >= r.ticketCount;
 }
 
+/** The moment this raffle's deadline draw fires if it isn't sold out first. */
+export function drawDeadline(r: Raffle): number {
+  return r.drawsAt && r.drawsAt > 0 ? r.drawsAt : r.createdAt + RAFFLE_DURATION_MS;
+}
+
+/** True when a draw should happen: the raffle is sold out or the draw date is reached. */
+export function drawDue(r: Raffle): boolean {
+  return isFull(r) || Date.now() >= drawDeadline(r);
+}
+
 function maybeScheduleDraw(r: Raffle) {
-  if (!isFull(r) || r.winner || drawTimer) return;
+  if (r.winner || drawTimer || !drawDue(r)) return;
   r.drawing = true;
   r.sellsAt = Date.now();
   persist(r);
@@ -227,6 +253,35 @@ function maybeScheduleDraw(r: Raffle) {
   }, delay);
 }
 
+/**
+ * Arm a timer that fires at the raffle's draw date (drawsAt). This is what
+ * makes an unsold raffle still end on schedule — the deadline draw happens
+ * even if nobody buys another ticket. Re-armed on every create/load; the old
+ * timer is cleared automatically when a new raffle replaces the previous one.
+ */
+// Node clamps setTimeout delays above 2^31-1 ms (~24.8 days) to 1ms, which
+// would fire an immediate draw for very long RAFFLE_DAYS values — so each tick
+// is capped well below the limit and re-armed until the real deadline.
+const MAX_TIMER_MS = 2_000_000_000; // ~23.1 days
+function armDeadlineTimer(r: Raffle) {
+  if (deadlineTimer) {
+    clearTimeout(deadlineTimer);
+    deadlineTimer = null;
+  }
+  const remaining = drawDeadline(r) - Date.now();
+  if (remaining <= 0) return; // already due — the boot/commit paths draw it
+  deadlineTimer = setTimeout(() => {
+    deadlineTimer = null;
+    // only draw the raffle this timer belongs to, and only if it's still live
+    if (current !== r || r.winner) return;
+    if (Date.now() >= drawDeadline(r)) {
+      maybeScheduleDraw(r);
+    } else {
+      armDeadlineTimer(r); // capped tick fired early; re-arm for the remainder
+    }
+  }, Math.min(remaining, MAX_TIMER_MS));
+}
+
 export function drawNow(r: Raffle) {
   if (drawTimer) {
     clearTimeout(drawTimer);
@@ -236,9 +291,13 @@ export function drawNow(r: Raffle) {
 }
 
 function drawWinner(r: Raffle) {
-  if (!r.sold.length || r.winner) return;
-  const pick = r.sold[Math.floor(Math.random() * r.sold.length)];
-  r.winner = { number: pick.number, email: pick.email, name: pick.name, token: crypto.randomUUID(), at: Date.now(), paid: false };
+  if (r.winner) return;
+  if (r.sold.length > 0) {
+    const pick = r.sold[Math.floor(Math.random() * r.sold.length)];
+    r.winner = { number: pick.number, email: pick.email, name: pick.name, token: crypto.randomUUID(), at: Date.now(), paid: false };
+  }
+  // Even with zero sales (deadline reached, nobody bought), the raffle ends and
+  // a fresh one starts; the winner stays null so nothing is notified.
   r.drawing = false;
   persist(r);
   archiveAndRestart(r);

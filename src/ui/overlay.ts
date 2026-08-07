@@ -24,6 +24,11 @@ export class RifaOverlay {
   private emailFocused = false;
   private nameValue = "";
 
+  // live draw-date countdown (ticked in place, no page rebuild)
+  private drawDeadline: number | null = null;
+  private drawCountdown: HTMLElement | null = null;
+  private countdownTimer: number | null = null;
+
   private pollTimer: number | null = null;
   private paymentPollTimer: number | null = null;
   private bootAt: number | null = null;
@@ -42,6 +47,8 @@ export class RifaOverlay {
     this.refresh();
     this.asyncLoop();
     this.build();
+    // Live draw-date countdown: ticks in place without wiping the page.
+    this.countdownTimer = window.setInterval(() => this.updateCountdown(), 1000);
   }
 
   private L() {
@@ -61,6 +68,8 @@ export class RifaOverlay {
 
   private wipe() {
     this.root.textContent = "";
+    this.drawCountdown = null;
+    this.drawDeadline = null;
   }
 
   private async refresh() {
@@ -221,7 +230,8 @@ export class RifaOverlay {
     const available = raffle.available;
     const raised = sold * raffle.price;
 
-    // left info card
+    // left column: raffle info card + live countdown below it
+    const infoCol = this.el("div", "info-col");
     const info = this.el("div", "panel info");
     info.appendChild(this.el("div", "info-title", raffle.title));
     info.appendChild(this.el("div", "info-prize", `${L.prizeName}: ${raffle.prize}`));
@@ -236,7 +246,27 @@ export class RifaOverlay {
     const totalPrize = Math.round(raffle.ticketCount * raffle.price * 0.7 * 100) / 100;
     mk(L.prizeAmountName, L.money(totalPrize, raffle.currency), "gold");
     mk(L.raisedName, L.money(raised, raffle.currency), "text");
-    this.root.appendChild(info);
+    if (raffle.drawDate) {
+      mk(
+        L.drawDateLabel,
+        new Date(raffle.drawDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+        "gold"
+      );
+    }
+    infoCol.appendChild(info);
+
+    if (raffle.drawDate) {
+      // live countdown to the draw date, below the raffle card
+      const cd = this.el("div", "draw-countdown");
+      cd.appendChild(this.el("span", "cd-name", L.drawInLabel));
+      const val = this.el("span", "cd-val", "");
+      cd.appendChild(val);
+      infoCol.appendChild(cd);
+      this.drawDeadline = raffle.drawDate;
+      this.drawCountdown = val;
+    }
+    this.updateCountdown();
+    this.root.appendChild(infoCol);
 
     // number grid
     const gridArea = this.el("div", "panel grid-area");
@@ -251,6 +281,24 @@ export class RifaOverlay {
     if (raffle.winner) {
       this.handleWinner(raffle);
     }
+  }
+
+  /** Paint the remaining time to the draw date (called every second). */
+  private updateCountdown() {
+    const val = this.drawCountdown;
+    if (!val || this.drawDeadline === null) return;
+    const L = this.L();
+    const diff = this.drawDeadline - Date.now();
+    if (diff <= 0) {
+      val.textContent = this.raffle?.winner ? "✓" : L.drawing;
+      return;
+    }
+    const total = Math.floor(diff / 1000);
+    const d = Math.floor(total / 86400);
+    const h = Math.floor((total % 86400) / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    val.textContent = `${d}d ${h}h ${m}m ${s}s`;
   }
 
   private buildGrid(): HTMLElement {
@@ -535,6 +583,7 @@ export class RifaOverlay {
     if (this.pollTimer) window.clearTimeout(this.pollTimer);
     if (this.paymentPollTimer) window.clearTimeout(this.paymentPollTimer);
     if (this.bootTimer) window.clearTimeout(this.bootTimer);
+    if (this.countdownTimer) window.clearInterval(this.countdownTimer);
     this.root.remove();
   }
 }

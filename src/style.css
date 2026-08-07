@@ -380,10 +380,20 @@ select.input {
   gap: 14px;
 }
 
-.info {
+/* Column holding the raffle card and the countdown strip below it. */
+.info-col {
+  position: absolute;
   top: 104px;
   left: 20px;
   width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.info {
+  position: relative;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -420,6 +430,31 @@ select.input {
 
 .info-val.gold {
   color: #ffca55;
+}
+
+/* Live draw-date countdown strip below the raffle card. */
+.draw-countdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(27, 13, 56, 0.96);
+  border: 2px solid rgba(255, 202, 85, 0.35);
+}
+
+.cd-name {
+  font-size: 13px;
+  color: #b8a0d8;
+}
+
+.cd-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffca55;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 .grid-area {
@@ -736,16 +771,19 @@ select.input {
     overflow-y: auto;
   }
 
-  .info {
+  .info-col {
     top: 96px;
     left: 12px;
     right: 12px;
     width: auto;
+  }
+
+  .info-col .info {
     padding: 14px;
   }
 
   .grid-area {
-    top: 300px;
+    top: 364px;
     left: 12px;
     right: 12px;
     bottom: 96px;

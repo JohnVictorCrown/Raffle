@@ -69,6 +69,8 @@ interface Messages {
   noRaffle: string;
   noRaffleHint: string;
   drawingSoon: string;
+  drawDateLabel: string;
+  drawInLabel: string;
   winnerEmailSent: string;
   winnerClaimLink: string;
   freeNumbers: string;
@@ -173,7 +175,9 @@ export const messages: Record<Language, Messages> = {
     adminNoRaffle: "No raffle has been created yet.",
     noRaffle: "No raffle is active yet.",
     noRaffleHint: "The raffle is created by the admin on /admin. A draw happens automatically when it fills up.",
-    drawingSoon: "The raffle is full. The winner is being drawn...",
+    drawingSoon: "The winner is being drawn...",
+    drawDateLabel: "Draw date",
+    drawInLabel: "Draws in",
     winnerEmailSent: "The winner has been notified by email.",
     winnerClaimLink: "Claim prize",
     freeNumbers: "free",
@@ -274,7 +278,9 @@ mePending: "In progress",
     adminNoRaffle: "Nenhuma rifa foi criada ainda.",
     noRaffle: "Nenhuma rifa ativa no momento.",
     noRaffleHint: "A rifa é criada pelo admin em /admin. Um sorteio acontece automaticamente quando ela esgotar.",
-    drawingSoon: "A rifa esgotou. O vencedor está sendo sorteado...",
+    drawingSoon: "O vencedor está sendo sorteado...",
+    drawDateLabel: "Data do sorteio",
+    drawInLabel: "Sorteio em",
     winnerEmailSent: "O vencedor foi notificado por email.",
     winnerClaimLink: "Resgatar prêmio",
     freeNumbers: "livres",

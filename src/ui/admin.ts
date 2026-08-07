@@ -154,6 +154,15 @@ export class AdminOverlay {
       statusPanel.appendChild(
         this.el("div", "info-prize", `${L.prizeName}: ${this.raffle.prize} • ${this.raffle.soldCount}/${this.raffle.ticketCount} ${L.soldName}`)
       );
+      if (this.raffle.drawDate) {
+        statusPanel.appendChild(
+          this.el(
+            "div",
+            "info-val gold",
+            `${L.drawDateLabel}: ${new Date(this.raffle.drawDate).toLocaleDateString()}`
+          )
+        );
+      }
       if (this.raffle.winner) {
         const w = this.el("div", "info-val gold", `${L.winnerLabel}: #${String(this.raffle.winner.number).padStart(2, "0")} (${this.raffle.winner.email})`);
         statusPanel.appendChild(w);

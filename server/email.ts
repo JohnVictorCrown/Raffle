@@ -337,14 +337,24 @@ interface ParticipationEmail {
   email: string;
   name: string;
   raffleTitle: string;
+  drawDate: number; // epoch ms of the scheduled draw date
   myRafflesUrl: string;
 }
 
 export async function sendParticipationEmail(m: ParticipationEmail): Promise<boolean> {
+  const drawDate = new Date(m.drawDate).toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
   const lines = [
     `Hi ${m.name || m.email},`,
     ``,
     `Your participation in "${m.raffleTitle}" is confirmed.`,
+    ``,
+    `The draw happens automatically on ${drawDate} — or as soon as all shares are sold, whichever comes first.`,
+    `The winner is picked randomly and notified by email.`,
+    ``,
     `Track your raffles anytime at:`,
     m.myRafflesUrl,
   ];

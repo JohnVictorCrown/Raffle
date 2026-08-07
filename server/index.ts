@@ -10,7 +10,8 @@ import {
   availableCount,
   pruneReservations,
   drawNow,
-  isFull,
+  drawDue,
+  drawDeadline,
   persist,
   onRaffleDrawn,
   loadRaffleFromDb,
@@ -179,6 +180,7 @@ function publicRaffle(lang: string) {
       ? { number: r.winner.number, email: r.winner.email, at: r.winner.at }
       : null,
     drawing: r.drawing,
+    drawDate: drawDeadline(r),
     exists: true,
     claimPath: r.winner ? prizeClaimPath(r.title, r.winner.token) : null,
   };
@@ -273,6 +275,7 @@ function onApproved(extRef: string) {
         email: user.email,
         name: user.name,
         raffleTitle: r.title,
+        drawDate: drawDeadline(r),
         myRafflesUrl: `${publicBase()}${myRafflesPath(user.code)}`,
       }).catch(() => {});
     } else {
@@ -683,7 +686,8 @@ async function bootstrap() {
     console.error("Storage init failed", err);
   }
   const boot = getRaffle();
-  if (boot && isFull(boot) && !boot.winner) {
+  if (boot && !boot.winner && drawDue(boot)) {
+    // sold out OR the 6-day draw date was reached while the server was down
     drawNow(boot); // archives the drawn raffle, starts the replacement, notifies
   }
   server.listen(PORT, () => {

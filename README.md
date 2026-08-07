@@ -82,6 +82,7 @@ A `render.yaml` blueprint is included — create a new Render **Blueprint**, sel
   - `EMAIL` / `EMAIL_FROM` — sender address (verify it in Brevo)
   - `BREVO_API_KEY` — required on Render **free** tier (SMTP ports 25/465/587 are blocked there). SMTP (`EMAIL_P`) only works locally / on paid instances.
   - `ORDER_TTL_MINUTES` — optional; how long a pending PIX order stays before its number holds are released and the order is dropped (default `30`). A payment approved after that is auto-refunded since it can no longer be fulfilled.
+  - `RAFFLE_DAYS` — optional; how long a raffle runs before its scheduled draw date (default `6`). The draw fires when the raffle sells out **or** when this deadline is reached, whichever comes first.
 - `PORT` defaults to `3001`; Render injects its own `PORT` if you keep it synced.
 - Local Node run (no Bun): `npm run server:node`
 
