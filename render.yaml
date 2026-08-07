@@ -69,5 +69,11 @@ services:
     buildCommand: bun install && bun run build:web
     staticPublishPath: dist
     autoDeployTrigger: commit
+    # SPA fallback: /admin, /me, /withdraw are client-side routes, so rewrite
+    # every unknown path to index.html instead of 404ing.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - fromGroup: raffle
