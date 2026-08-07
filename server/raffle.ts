@@ -301,7 +301,13 @@ function drawWinner(r: Raffle) {
   r.drawing = false;
   persist(r);
   archiveAndRestart(r);
-  onDraw?.(r);
+  // The draw itself (winner picked + archived) is already complete and saved;
+  // a failing notification listener must never break it.
+  try {
+    onDraw?.(r);
+  } catch (err) {
+    console.error("[raffle] draw notification callback failed", err);
+  }
 }
 
 /**
@@ -383,7 +389,13 @@ export function archiveCurrentForAdmin(r: Raffle): void {
     createdAt: r.createdAt,
     endedAt: Date.now(),
   });
-  if (announced) onDraw?.(r);
+  if (announced) {
+    try {
+      onDraw?.(r);
+    } catch (err) {
+      console.error("[raffle] draw notification callback failed", err);
+    }
+  }
 }
 
 export function getPendingReservation(numbers: number[]) {
