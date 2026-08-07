@@ -9,7 +9,7 @@
     "server:node": "tsx server/index.ts",
     "typecheck:server": "tsc -p tsconfig.server.json",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
-    "build:web": "vite build",
+    "build:web": "node -e \"var v=process.env.VITE_API_URL||''; console.log('[build] VITE_API_URL ='+JSON.stringify(process.env.VITE_API_URL??'(not set)')); console.log('[build] API BASE = '+('/'+(v?v.replace(/\\/+$/,''):'(same origin)')))\" && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
