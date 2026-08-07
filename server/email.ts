@@ -48,8 +48,43 @@ function parseFrom(addr: string): { name: string; email: string } {
   return { name: "Golden Lion Raffle", email: addr.trim() || user };
 }
 
+const senderEmail = parseFrom(from).email;
+
+let brevoSenderStatus: boolean | null = null; // null = unknown, true = valid, false = invalid
+
+/**
+ * Ask Brevo whether our sender address is validated. Cached per process.
+ * Brevo returns 201 even when it later rejects the message (as it did for an
+ * unvalidated sender), so we must check this BEFORE sending to avoid the
+ * "sent" lie. Returns null if the check itself fails (still proceed).
+ */
+async function brevoSenderValid(): Promise<boolean | null> {
+  if (brevoSenderStatus !== null) return brevoSenderStatus;
+  try {
+    const res = await fetch("https://api.brevo.com/v3/senders", {
+      headers: { "api-key": brevoKey },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { senders?: { email?: string; active?: boolean }[] };
+    const senders = data?.senders ?? [];
+    const found = senders.find((s) => (s.email ?? "").toLowerCase() === senderEmail.toLowerCase());
+    brevoSenderStatus = found ? Boolean(found.active) : false;
+  } catch {
+    brevoSenderStatus = null;
+  }
+  if (brevoSenderStatus === false) {
+    console.error(
+      `[email] brevo sender "${senderEmail}" is NOT validated — verify it in Brevo (Senders) or authenticate a domain. Emails will be rejected.`
+    );
+  }
+  return brevoSenderStatus;
+}
+
 /** Send via Brevo HTTP API (port 443 — not blocked on Render free tier). */
 async function sendBrevo(to: string, subject: string, text: string, html?: string): Promise<boolean> {
+  const valid = await brevoSenderValid();
+  if (valid === false) return false;
+
   const { name, email } = parseFrom(from);
   const payload = {
     sender: { name, email },
