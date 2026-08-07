@@ -549,6 +549,20 @@ async function bootstrap() {
   }
   server.listen(PORT, () => {
     console.log(`Rifa API server listening on http://localhost:${PORT}`);
+    console.log(
+      "[env] MP_ACCESS_TOKEN=" +
+        (process.env.MP_ACCESS_TOKEN ? "SET(" + process.env.MP_ACCESS_TOKEN.slice(0, 10) + "…)" : "unset") +
+        " MP_NOTIFICATION_URL=" +
+        (process.env.MP_NOTIFICATION_URL ? "SET" : "unset") +
+        " ADMIN_PASSWORD=" +
+        (process.env.ADMIN_PASSWORD ? "SET" : "unset") +
+        " TURSO_URL=" +
+        (process.env.TURSO_URL ? "SET" : "unset") +
+        " TURSO_TOKEN=" +
+        (process.env.TURSO_TOKEN || process.env.TURSO_AUTH_TOKEN ? "SET" : "unset") +
+        " PORT=" +
+        (process.env.PORT ?? "(default)")
+    );
   });
   reconcileTimer = setInterval(() => void reconcileOrders(), RECONCILE_MS);
 }
