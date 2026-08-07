@@ -1,22 +1,22 @@
 /**
  * Email delivery.
  *
- * When `EMAIL_USER` / `EMAIL_PASS` (a Gmail app password) are configured it
+ * When `EMAIL` / `EMAIL_P` (a Gmail app password) are configured it
  * sends real email over SMTP (SMTPS on 465). Otherwise it falls back to
  * logging so the feature can be developed locally.
  *
  *    EMAIL_HOST=smtp.gmail.com
  *    EMAIL_PORT=465
- *    EMAIL_USER=stellar.505org@gmail.com
- *    EMAIL_PASS=<gmail-app-password>
+ *    EMAIL=stellar.505org@gmail.com
+ *    EMAIL_P=<gmail-app-password>
  *    EMAIL_FROM=Stellar Foundation Raffle <stellar.505org@gmail.com>
  */
 import tls from "node:tls";
 
 const host = process.env.EMAIL_HOST ?? "smtp.gmail.com";
 const port = Number(process.env.EMAIL_PORT ?? 465);
-const user = process.env.EMAIL_USER ?? "";
-const pass = process.env.EMAIL_PASS ?? "";
+const user = process.env.EMAIL ?? "";
+const pass = process.env.EMAIL_P ?? "";
 const from = process.env.EMAIL_FROM ?? `Golden Lion Raffle <${user}>`;
 
 const configured = Boolean(user && pass);

@@ -563,8 +563,8 @@ async function bootstrap() {
         " ADMIN_PASSWORD=" + has("ADMIN_PASSWORD") +
         " TURSO_URL=" + has("TURSO_URL") +
         " TURSO_TOKEN=" + has("TURSO_TOKEN") +
-        " EMAIL_USER=" + has("EMAIL_USER") +
-        " EMAIL_PASS=" + has("EMAIL_PASS") +
+        " EMAIL=" + has("EMAIL") +
+        " EMAIL_P=" + has("EMAIL_P") +
         " PUBLIC_HOST=" + (process.env.PUBLIC_HOST || "(default)") +
         " PORT=" + (process.env.PORT ?? "(default)")
     );

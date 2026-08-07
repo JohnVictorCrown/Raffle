@@ -29,9 +29,9 @@ envVarGroups:
         sync: false
       - key: EMAIL_PORT
         sync: false
-      - key: EMAIL_USER
+      - key: EMAIL
         sync: false
-      - key: EMAIL_PASS
+      - key: EMAIL_P
         sync: false
       - key: EMAIL_FROM
         sync: false

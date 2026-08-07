@@ -25,10 +25,10 @@ async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<
 
 /** Verify Gmail SMTP works by sending a tiny test email to the sender address. */
 async function checkEmail(): Promise<void> {
-  const from = (process.env.EMAIL_FROM || `Golden Lion Raffle <${process.env.EMAIL_USER || ""}>`).trim();
-  const to = process.env.EMAIL_USER;
-  if (!to || !process.env.EMAIL_PASS) {
-    fail(`EMAIL_USER / EMAIL_PASS are not configured (SMTP email will not send).`);
+  const from = (process.env.EMAIL_FROM || `Golden Lion Raffle <${process.env.EMAIL || ""}>`).trim();
+  const to = process.env.EMAIL;
+  if (!to || !process.env.EMAIL_P) {
+    fail(`EMAIL / EMAIL_P are not configured (SMTP email will not send).`);
   }
   const ok = await withTimeout(
     sendEmail(to, "Rifa — startup email check", "This is an automated startup check. Emails are working ✓"),
