@@ -35,15 +35,19 @@ envVarGroups:
         sync: false
       - key: EMAIL_FROM
         sync: false
-      - key: VITE_API_URL
-        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
 
+# NOTE: VITE_API_URL is intentionally NOT in the env group. The committed
+# .env.production (forced via vite.config.ts `define`) supplies it at build
+# time. Having it here as an env var invites an empty-variable shadow override.
+
 services:
   # ----- Backend (Node web service) -----
+  # Link ONLY the shared group. Do NOT add per-service env vars here: an empty
+  # service-level value shadows the group's (same trap that broke VITE_API_URL).
   - type: web
     name: Raffle-web
     runtime: node
@@ -66,8 +70,4 @@ services:
     staticPublishPath: dist
     autoDeployTrigger: commit
     envVars:
-      # VITE_API_URL is supplied by the committed .env.production (Vite reads it
-      # during `vite build`). Do NOT declare it here as a service var: an empty
-      # service-level value would shadow the .env.production one (process env
-      # beats .env files in Vite).
       - fromGroup: raffle
