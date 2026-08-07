@@ -49,13 +49,14 @@ function parseFrom(addr: string): { name: string; email: string } {
 }
 
 /** Send via Brevo HTTP API (port 443 — not blocked on Render free tier). */
-async function sendBrevo(to: string, subject: string, text: string): Promise<boolean> {
+async function sendBrevo(to: string, subject: string, text: string, html?: string): Promise<boolean> {
   const { name, email } = parseFrom(from);
   const payload = {
     sender: { name, email },
     to: [{ email: to }],
     subject,
     textContent: text,
+    ...(html ? { htmlContent: html } : {}),
   };
   try {
     const res = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -214,9 +215,9 @@ function runSession(cand: Candidate, to: string, subject: string, text: string):
   });
 }
 
-/** Send one plain-text email (Brevo API when a key is set, else Gmail SMTP). */
-export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
-  if (brevoKey) return sendBrevo(to, subject, text);
+/** Send one plain-text email with an optional styled HTML version. */
+export async function sendEmail(to: string, subject: string, text: string, html?: string): Promise<boolean> {
+  if (brevoKey) return sendBrevo(to, subject, text, html);
   if (!configured) {
     console.log(`[email] (dev) -> ${to} subject="${subject}"`);
     console.log(text.replace(/^/gm, "    "));
@@ -245,6 +246,33 @@ export function myRafflesPath(code: string): string {
   return `/me?code=${encodeURIComponent(code)}`;
 }
 
+/** Render a simple, inline-styled HTML email from the plain-text paragraphs. */
+function htmlEmail(title: string, lines: string[]): string {
+  const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  const linkify = (s: string) => s.replace(/(https?:\/\/[^\s<]+)/g, (url) => `<a href="${url}" style="color:#c9a227;font-weight:600;">${url}</a>`);
+  const paragraphs = lines
+    .map((l) => (l ? `<p style="margin:0 0 12px;">${linkify(esc(l))}</p>` : `<p style="margin:0 0 12px;">&nbsp;</p>`))
+    .join("");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background-color:#14100c;font-family:Georgia,'Times New Roman',serif;">
+  <div style="max-width:600px;margin:0 auto;background-color:#1c1711;color:#f3ead9;">
+    <div style="background-color:#14100c;padding:24px 32px;border-bottom:3px solid #c9a227;">
+      <span style="color:#c9a227;font-size:20px;font-weight:bold;letter-spacing:1px;">&#129409; GOLDEN LION RAFFLE</span>
+    </div>
+    <div style="padding:28px 32px;">
+      <h1 style="color:#c9a227;font-size:22px;margin:0 0 18px;font-family:Arial,sans-serif;">${esc(title)}</h1>
+      ${paragraphs}
+    </div>
+    <div style="background-color:#14100c;padding:18px 32px;border-top:1px solid #3a3124;color:#9a8c72;font-size:12px;">
+      You're receiving this because you joined a Golden Lion raffle.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 interface WinnerEmail {
   email: string;
   name: string;
@@ -254,17 +282,19 @@ interface WinnerEmail {
 }
 
 export async function sendWinnerEmail(m: WinnerEmail): Promise<boolean> {
+  const lines = [
+    `Congratulations ${m.name || m.email}, the random draw chose your number and you won the raffle!`,
+    ``,
+    `Prize to withdraw: ${m.amount.toFixed(2)}`,
+    ``,
+    `Use the link below to select your PIX key and receive your prize:`,
+    m.withdrawUrl,
+  ];
   return sendEmail(
     m.email,
     `🎉 You won "${m.raffleTitle}"!`,
-    [
-      `Congratulations ${m.name || m.email}, the random draw chose your number and you won the raffle!`,
-      ``,
-      `Prize to withdraw: ${m.amount.toFixed(2)}`,
-      ``,
-      `Use the link below to select your PIX key and receive your prize:`,
-      m.withdrawUrl,
-    ].join("\n")
+    lines.join("\n"),
+    htmlEmail(`You won "${m.raffleTitle}"!`, lines)
   );
 }
 
@@ -276,16 +306,18 @@ interface ParticipationEmail {
 }
 
 export async function sendParticipationEmail(m: ParticipationEmail): Promise<boolean> {
+  const lines = [
+    `Hi ${m.name || m.email},`,
+    ``,
+    `Your participation in "${m.raffleTitle}" is confirmed.`,
+    `Track your raffles anytime at:`,
+    m.myRafflesUrl,
+  ];
   return sendEmail(
     m.email,
     `You joined "${m.raffleTitle}"`,
-    [
-      `Hi ${m.name || m.email},`,
-      ``,
-      `Your participation in "${m.raffleTitle}" is confirmed.`,
-      `Track your raffles anytime at:`,
-      m.myRafflesUrl,
-    ].join("\n")
+    lines.join("\n"),
+    htmlEmail(`Participation confirmed`, lines)
   );
 }
 
@@ -301,20 +333,22 @@ interface ResultEmail {
 
 export async function sendResultEmail(m: ResultEmail): Promise<boolean> {
   const subject = m.won ? `🎉 You WON "${m.raffleTitle}"` : `"${m.raffleTitle}" result is in`;
+  const lines = [
+    m.won ? `Congratulations ${m.name || m.email}, you won!` : `Hi ${m.name || m.email},`,
+    ``,
+    `Raffle: ${m.raffleTitle}`,
+    `Winning number: #${String(m.winnerNumber).padStart(2, "0")}`,
+    `Winner paid out to: ${m.winnerName}`,
+    ``,
+    m.won
+      ? "Use the link below to choose your PIX key and receive your prize:"
+      : "See your raffles and the result at:",
+    m.resultUrl,
+  ];
   return sendEmail(
     m.email,
     subject,
-    [
-      m.won ? `Congratulations ${m.name || m.email}, you won!` : `Hi ${m.name || m.email},`,
-      ``,
-      `Raffle: ${m.raffleTitle}`,
-      `Winning number: #${String(m.winnerNumber).padStart(2, "0")}`,
-      `Winner paid out to: ${m.winnerName}`,
-      ``,
-      m.won
-        ? "Use the link below to choose your PIX key and receive your prize:"
-        : "See your raffles and the result at:",
-      m.resultUrl,
-    ].join("\n")
+    lines.join("\n"),
+    htmlEmail(m.won ? `You won "${m.raffleTitle}"!` : `"${m.raffleTitle}" result`, lines)
   );
 }
