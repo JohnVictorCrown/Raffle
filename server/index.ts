@@ -102,6 +102,21 @@ function readBody(req: Request): Promise<Record<string, any>> {
   return req.json().then((v) => (v ?? {}) as Record<string, any>).catch(() => ({}));
 }
 
+/**
+ * Public base URL for links in emails (participation / winner / result).
+ * Resolution order: PUBLIC_HOST (frontend domain) → CORS_ORIGIN (frontend
+ * origin, used as a fallback) → http://localhost:3000 (local dev only).
+ * Ensures a production deploy with PUBLIC_HOST unset never emails localhost
+ * links when CORS_ORIGIN is configured.
+ */
+function publicBase(): string {
+  const host = (process.env.PUBLIC_HOST ?? "").trim();
+  if (host) return `https://${host.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
+  const origin = (process.env.CORS_ORIGIN ?? "").trim();
+  if (origin && origin !== "*") return origin.replace(/\/+$/, "");
+  return "http://localhost:3000";
+}
+
 function findPendingByPaymentId(paymentId: string): PendingOrder | undefined {
   for (const o of orders.values()) {
     if (o.paymentId === paymentId) return o;
@@ -146,7 +161,7 @@ function notifyRaffleEnded(r: Raffle) {
   const winnerUser = getUserByEmail(r.winner.email);
   const winnerName = winnerUser?.name || r.winner.name || r.winner.email;
 
-  const base = `https://${process.env.PUBLIC_HOST ?? "localhost:3000"}`;
+  const base = publicBase();
   const withdrawUrl = `${base}${prizeClaimPath(r.title, r.winner.token)}`;
 
   // Winner: withdraw instructions.
@@ -206,7 +221,7 @@ function onApproved(extRef: string) {
       email: user.email,
       name: user.name,
       raffleTitle: r.title,
-      myRafflesUrl: `https://${process.env.PUBLIC_HOST ?? "localhost:3000"}${myRafflesPath(user.code)}`,
+      myRafflesUrl: `${publicBase()}${myRafflesPath(user.code)}`,
     }).catch(() => {});
   } else {
     console.warn(
@@ -569,6 +584,14 @@ async function bootstrap() {
         " PUBLIC_HOST=" + (process.env.PUBLIC_HOST || "(default)") +
         " PORT=" + (process.env.PORT ?? "(default)")
     );
+    const pubHost = (process.env.PUBLIC_HOST ?? "").trim();
+    const corsOrigin = (process.env.CORS_ORIGIN ?? "").trim();
+    if (!pubHost && (!corsOrigin || corsOrigin === "*")) {
+      console.warn(
+        "[config] PUBLIC_HOST is not set — participation/winner emails will link to http://localhost:3000 " +
+          "instead of your domain. Set PUBLIC_HOST (e.g. raffle-oqkf.onrender.com) in the raffle env group on Render."
+      );
+    }
   });
   reconcileTimer = setInterval(() => void reconcileOrders(), RECONCILE_MS);
 }

@@ -65,7 +65,7 @@ A `render.yaml` blueprint is included — create a new Render **Blueprint**, sel
 - Set in the Render dashboard under *Environment*:
   - `MP_TOKEN` → your Mercado Pago access token
   - `ADMIN_PASSWORD` → admin password
-  - `PUBLIC_HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links)
+  - `PUBLIC_HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links and the "my raffles" links in emails). If unset, `CORS_ORIGIN` is used as a fallback; if neither is set the server warns at startup and emails link to `http://localhost:3000`.
   - `CORS_ORIGIN` → the **frontend** origin, e.g. `https://rifa-web.onrender.com` (must be an exact origin, not `*`, when deploying apart)
   - `MP_URL` → `https://rifa-api.onrender.com/api/webhooks` (reachable HTTPS endpoint)
   - `EMAIL` / `EMAIL_FROM` — sender address (verify it in Brevo)
