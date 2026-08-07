@@ -66,4 +66,8 @@ services:
     staticPublishPath: dist
     autoDeployTrigger: commit
     envVars:
+      # VITE_API_URL is build-time only, so declare it directly on the static
+      # service to guarantee it reaches `vite build` (set the value in Render).
+      - key: VITE_API_URL
+        sync: false
       - fromGroup: raffle
