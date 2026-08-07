@@ -20,23 +20,24 @@ function loadDotEnv(file) {
   }
 }
 
-// Vite's precedence: a var already present in process.env is used even if empty
-// and is NOT overwritten by .env files. So `hasOwn` (defined-but-empty) alone
-// suppresses .env.production. Mirror that exactly.
+// Matches vite.config.ts: in production, .env.production is authoritative
+// (forced via `define`), so it wins over any process env var. In dev, fall back
+// to the normal Vite behavior (process env, else .env.production, else .env).
 const hasEnv = Object.prototype.hasOwnProperty.call(process.env, "VITE_API_URL");
-const value = hasEnv
-  ? (process.env.VITE_API_URL ?? "").trim()
-  : loadDotEnv(".env.production").VITE_API_URL || loadDotEnv(".env").VITE_API_URL || "";
+const fileProd = loadDotEnv(".env.production").VITE_API_URL;
+const fileGeneric = loadDotEnv(".env").VITE_API_URL;
+const value = fileProd || (hasEnv ? (process.env.VITE_API_URL ?? "").trim() : fileGeneric || "");
 const u = value.replace(/\/+$/g, "");
 
 console.log("[build] VITE_API_URL (effective) = " + JSON.stringify(value || "(NOT SET)"));
-if (hasEnv) {
+if (fileProd) {
+  console.log("[build]   ^ forced from .env.production (immune to deploy env vars)");
+} else if (hasEnv) {
   console.log(
-    "[build]   ^ comes from process.env; this OVERRIDES .env.production" +
-      (value ? "" : " (it is currently EMPTY!)")
+    "[build]   ^ comes from process.env" + (value ? "" : " (it is currently EMPTY!)")
   );
 } else {
-  console.log("[build]   ^ read from .env.production");
+  console.log("[build]   ^ read from .env");
 }
 console.log("[build] baked base         = " + (u ? "//" + u : "(SAME ORIGIN)"));
 if (!value) {
