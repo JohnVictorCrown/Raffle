@@ -12,7 +12,6 @@ services:
   - type: web
     name: rifa-api
     runtime: node
-    plan: free
     buildCommand: npm install
     startCommand: npm run server:node
     healthCheckPath: /api/health
@@ -42,7 +41,6 @@ services:
   - type: web
     name: rifa-web
     runtime: static
-    plan: free
     buildCommand: npm install && npm run build:web
     staticPublishPath: ./dist
     buildFilter:
