@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import crypto from "node:crypto";
 import { kvGet, kvSet } from "./db";
 import { addToHistory } from "./storage";
@@ -29,7 +27,6 @@ export interface Raffle {
 }
 
 const RAFFLE_KEY = "raffle:current";
-const FILE = join(process.cwd(), "server", "data", "raffle.json"); // legacy JSON (one-time migration)
 
 let current: Raffle | null = null;
 let drawTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,8 +92,7 @@ export function persist(r: Raffle) {
 
 let saveQueue: Promise<void> = Promise.resolve();
 
-// Load the current raffle from Turso. On first run (empty DB) it migrates any
-// existing JSON file so existing local data isn't lost.
+// Load the current raffle from Turso.
 export async function loadRaffleFromDb(): Promise<Raffle | null> {
   current = null;
   try {
@@ -104,12 +100,6 @@ export async function loadRaffleFromDb(): Promise<Raffle | null> {
     if (row) current = JSON.parse(row) as Raffle;
   } catch (err) {
     console.error("Failed to read raffle from Turso", err);
-  }
-  if (!current && existsSync(FILE)) {
-    try {
-      current = JSON.parse(readFileSync(FILE, "utf-8")) as Raffle;
-      persist(current);
-    } catch {}
   }
   return current;
 }

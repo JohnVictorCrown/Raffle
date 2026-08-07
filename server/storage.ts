@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import crypto from "node:crypto";
 import { initDb, kvGet, kvSet, kvAll } from "./db";
 
@@ -33,14 +31,10 @@ export interface PastRaffle {
   endedAt: number;
 }
 
-const FILE_USERS = join(process.cwd(), "server", "data", "users.json");
-const FILE_HISTORY = join(process.cwd(), "server", "data", "history.json");
-
 let users: Record<string, UserRecord> = {};
 let history: PastRaffle[] = [];
 
-// Load persisted users/history from the Turso kv table. On first run (empty DB)
-// it migrates any existing JSON files so no data is lost.
+// Load persisted users/history from the Turso kv table.
 export async function loadStorage(): Promise<void> {
   await initDb();
 
@@ -58,24 +52,6 @@ export async function loadStorage(): Promise<void> {
     history.sort((a, b) => a.endedAt - b.endedAt);
   } catch (err) {
     console.error("Failed to read storage from Turso, starting fresh", err);
-  }
-
-  // one-time migration of legacy JSON files
-  if (Object.keys(users).length === 0 && existsSync(FILE_USERS)) {
-    try {
-      const old = JSON.parse(readFileSync(FILE_USERS, "utf-8")) as Record<string, UserRecord>;
-      for (const [key, u] of Object.entries(old)) {
-        users[key] = u;
-        await kvSet(`user:${key}`, u);
-      }
-    } catch {}
-  }
-  if (history.length === 0 && existsSync(FILE_HISTORY)) {
-    try {
-      const old = JSON.parse(readFileSync(FILE_HISTORY, "utf-8")) as PastRaffle[];
-      history = old.sort((a, b) => a.endedAt - b.endedAt);
-      for (const h of history) await kvSet(`hist:${h.id}`, h);
-    } catch {}
   }
 }
 
