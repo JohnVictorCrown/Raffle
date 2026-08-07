@@ -57,6 +57,11 @@ export async function createPixOrder(opts: CreatePixOrderOpts): Promise<{
       email: opts.payerEmail,
       first_name: opts.payerName,
     },
+    // Webhook URL — required in production so Mercado Pago notifies us (and we
+    // register the sale) even if the client closes the tab after scanning.
+    ...(process.env.MP_NOTIFICATION_URL
+      ? { notification_url: process.env.MP_NOTIFICATION_URL }
+      : {}),
   };
 
   const requestOptions: Options = {

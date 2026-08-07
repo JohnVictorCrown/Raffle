@@ -10,8 +10,11 @@ export function buildFooter(L: any): HTMLDivElement {
   secure.className = "footer-line";
   secure.textContent = `${L.footerSecurity}`;
 
-  const foundation = document.createElement("div");
-  foundation.className = "footer-line";
+  const foundation = document.createElement("a");
+  foundation.className = "footer-line footer-link";
+  foundation.href = "https://www.stellarium.ddns-ip.net";
+  foundation.target = "_blank";
+  foundation.rel = "noopener";
   foundation.textContent = `⭐ ${L.footerFoundation}`;
 
   const link = document.createElement("a");

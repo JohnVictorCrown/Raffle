@@ -4,8 +4,13 @@ import { buildFooter } from "./footer";
 
 export class MyRafflesOverlay {
   private root: HTMLElement;
+  private body: HTMLElement | null = null;
 
-  constructor(private container: HTMLElement, private code: string) {
+  constructor(
+    private container: HTMLElement,
+    private code: string,
+    private email: string
+  ) {
     this.root = document.createElement("div");
     this.root.className = "ui";
     this.container.appendChild(this.root);
@@ -44,12 +49,58 @@ export class MyRafflesOverlay {
 
     this.root.appendChild(buildFooter(L));
 
+    // No code or email: ask the user for their email, which is an alias for the
+    // code and lets them see their raffles + results.
+    if (!this.code && !this.email) {
+      this.renderEmailForm();
+      return;
+    }
+
     try {
-      const data = await getMyRaffles(this.code);
+      const data = await getMyRaffles(this.code, this.email);
       this.render(data);
     } catch {
       this.renderBad();
     }
+  }
+
+  private renderEmailForm() {
+    const L = this.L();
+    const body = this.el("div", "admin-body");
+    const card = this.el("div", "panel");
+    card.appendChild(this.el("div", "panel-title", L.meTitle));
+
+    const row = this.el("label", "field");
+    row.appendChild(this.el("span", "field-label", L.meEmailLabel));
+    const input = this.el("input", "input");
+    input.type = "email";
+    input.placeholder = L.meEmailPh;
+    row.appendChild(input);
+    card.appendChild(row);
+
+    const msg = this.el("div", "modal-status");
+    card.appendChild(msg);
+
+    const btn = this.el("button", "btn btn-primary", L.meEmailBtn);
+    btn.onclick = async () => {
+      const email = input.value.trim();
+      if (!email) return;
+      btn.disabled = true;
+      try {
+        const data = await getMyRaffles("", email);
+        if (this.body) this.body.remove();
+        this.render(data);
+      } catch (err: any) {
+        msg.textContent = err?.message ?? L.meBadLink;
+        msg.classList.add("err");
+        btn.disabled = false;
+      }
+    };
+    card.appendChild(btn);
+
+    body.appendChild(card);
+    this.body = body;
+    this.root.appendChild(body);
   }
 
   private renderBad() {

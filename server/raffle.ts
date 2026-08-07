@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import crypto from "node:crypto";
+import { kvGet, kvSet } from "./db";
 import { addToHistory } from "./storage";
 
 export interface Sale {
@@ -27,8 +28,8 @@ export interface Raffle {
   sellsAt: number; // timestamp when the raffle filled up
 }
 
-const DATA_DIR = join(process.cwd(), "server", "data");
-const FILE = join(DATA_DIR, "raffle.json");
+const RAFFLE_KEY = "raffle:current";
+const FILE = join(process.cwd(), "server", "data", "raffle.json"); // legacy JSON (one-time migration)
 
 let current: Raffle | null = null;
 let drawTimer: ReturnType<typeof setTimeout> | null = null;
@@ -41,8 +42,30 @@ export function onRaffleDrawn(fn: Drawer) {
   onDraw = fn;
 }
 
-// pending (reserved) numbers not yet paid — in-memory only
+// pending (reserved) numbers not yet paid — persisted to Turso so they survive restarts
 const reserved = new Map<number, { email: string; expiresAt: number }>();
+const RESERVATIONS_KEY = "raffle:reservations";
+
+let reservationQueue: Promise<void> = Promise.resolve();
+function saveReservations() {
+  reservationQueue = reservationQueue
+    .then(() => kvSet(RESERVATIONS_KEY, Object.fromEntries(reserved)))
+    .catch((err) => console.error("reservations save failed", err));
+}
+
+export async function loadReservations(): Promise<void> {
+  try {
+    const row = await kvGet(RESERVATIONS_KEY);
+    if (row) {
+      const data = JSON.parse(row) as Record<string, { email: string; expiresAt: number }>;
+      reserved.clear();
+      for (const [k, v] of Object.entries(data)) reserved.set(Number(k), v);
+    }
+  } catch (err) {
+    console.error("Failed to load reservations", err);
+  }
+  pruneReservations();
+}
 
 function emptyRaffle(): Raffle {
   return {
@@ -63,23 +86,36 @@ function emptyRaffle(): Raffle {
 }
 
 export function persist(r: Raffle) {
-  mkdirSync(dirname(FILE), { recursive: true });
-  writeFileSync(FILE, JSON.stringify(r, null, 2));
+  // Serialize writes to the single raffle key: the drawn raffle is immediately
+  // replaced by an empty clone (archiveAndRestart), so ordering must be exact.
+  saveQueue = saveQueue
+    .then(() => kvSet(RAFFLE_KEY, r))
+    .catch((err) => console.error("raffle save failed", err));
 }
 
-export function loadRaffle(): Raffle | null {
+let saveQueue: Promise<void> = Promise.resolve();
+
+// Load the current raffle from Turso. On first run (empty DB) it migrates any
+// existing JSON file so existing local data isn't lost.
+export async function loadRaffleFromDb(): Promise<Raffle | null> {
+  current = null;
   try {
-    if (existsSync(FILE)) {
-      current = JSON.parse(readFileSync(FILE, "utf-8")) as Raffle;
-    }
-  } catch {
-    current = null;
+    const row = await kvGet(RAFFLE_KEY);
+    if (row) current = JSON.parse(row) as Raffle;
+  } catch (err) {
+    console.error("Failed to read raffle from Turso", err);
   }
-  return current ?? null;
+  if (!current && existsSync(FILE)) {
+    try {
+      current = JSON.parse(readFileSync(FILE, "utf-8")) as Raffle;
+      persist(current);
+    } catch {}
+  }
+  return current;
 }
 
 export function getRaffle(): Raffle | null {
-  return current ?? loadRaffle();
+  return current;
 }
 
 /** Replace the current (single) raffle, wiping sales/winner. */
@@ -135,11 +171,13 @@ export function reserveNumbers(r: Raffle, numbers: number[], email: string, ttlM
   }
   const expiresAt = Date.now() + ttlMs;
   for (const n of numbers) reserved.set(n, { email, expiresAt });
+  saveReservations();
   return true;
 }
 
 export function releaseNumbers(numbers: number[]) {
   for (const n of numbers) reserved.delete(n);
+  saveReservations();
 }
 
 /** Commit paid numbers (already reserved) to the raffle; triggers a win when the raffle is full. */
@@ -155,6 +193,7 @@ export function commitSale(r: Raffle, numbers: number[], email: string, name?: s
     // holds won't release reservations for these; drop reservations
     r.sold.sort((a, b) => a.number - b.number);
     persist(r);
+    saveReservations();
     maybeScheduleDraw(r);
   }
 }
@@ -223,15 +262,65 @@ function archiveAndRestart(r: Raffle) {
   });
 }
 
-/** Prune expired reservations (kept on reads). */
-export function pruneReservations(r: Raffle) {
+/** Prune expired reservations and persist the result. */
+export function pruneReservations() {
   const now = Date.now();
+  let changed = false;
   for (const [n, v] of reserved) {
-    if (v.expiresAt < now) reserved.delete(n);
+    if (v.expiresAt < now) {
+      reserved.delete(n);
+      changed = true;
+    }
   }
-  void r;
+  if (changed) saveReservations();
+}
+
+/**
+ * Archive the active raffle when the admin replaces it with a new one. If it
+ * has sales but no winner yet, a winner is drawn first so the sold numbers are
+ * honored instead of silently discarded.
+ */
+export function archiveCurrentForAdmin(r: Raffle): void {
+  let announced = false;
+  if (r.sold.length > 0) {
+    if (!r.winner) {
+      const pick = r.sold[Math.floor(Math.random() * r.sold.length)];
+      r.winner = {
+        number: pick.number,
+        email: pick.email,
+        name: pick.name,
+        token: crypto.randomUUID(),
+        at: Date.now(),
+        paid: false,
+      };
+      r.drawing = false;
+      announced = true;
+    }
+    persist(r);
+  }
+  if (r.sold.length === 0 && !r.winner) return;
+  addToHistory({
+    id: r.id,
+    title: r.title,
+    prize: r.prize,
+    prizePt: r.prizePt,
+    soldCount: r.sold.length,
+    raised: Math.round(r.sold.reduce((a, s) => a + s.amount, 0) * 100) / 100,
+    winnerNumber: r.winner?.number ?? null,
+    winner: r.winner,
+    sold: r.sold.map((s) => ({ number: s.number, email: s.email, name: s.name, amount: s.amount, at: s.at })),
+    createdAt: r.createdAt,
+    endedAt: Date.now(),
+  });
+  if (announced) onDraw?.(r);
 }
 
 export function getPendingReservation(numbers: number[]) {
   return numbers.map((n) => reserved.get(n)).filter(Boolean);
+}
+
+/** Await all in-flight raffle + reservation writes (used at shutdown). */
+export async function flushSaves(): Promise<void> {
+  await saveQueue;
+  await reservationQueue;
 }

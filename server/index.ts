@@ -13,6 +13,10 @@ import {
   isFull,
   persist,
   onRaffleDrawn,
+  loadRaffleFromDb,
+  loadReservations,
+  flushSaves,
+  archiveCurrentForAdmin,
   type Raffle,
 } from "./raffle";
 import { sendWinnerEmail, prizeClaimPath, sendParticipationEmail, sendResultEmail, myRafflesPath } from "./email";
@@ -24,8 +28,11 @@ import {
   getHistory,
   findDrawnByToken,
   markWinnerPaid,
+  loadStorage,
   type PastRaffle,
+  type UserRecord,
 } from "./storage";
+import { db, kvSet, kvAll, kvDelete, flushDb } from "./db";
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -43,12 +50,45 @@ interface PendingOrder {
   email: string;
   name: string;
   amount: number;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   createdAt: number;
 }
 
 // orders keyed by external_reference and by payment id
 const orders = new Map<string, PendingOrder>();
+
+// Pending orders are persisted to Turso so an approved webhook is still
+// registered even after a restart, and re-indexed in memory on boot.
+async function saveOrder(p: PendingOrder) {
+  try {
+    await kvSet(`order:${p.paymentId}`, p);
+  } catch (err) {
+    console.error("order save failed", err);
+  }
+}
+
+async function removeOrder(p: PendingOrder) {
+  orders.delete(p.extRef);
+  orders.delete(p.paymentId);
+  try {
+    await kvDelete(`order:${p.paymentId}`);
+  } catch (err) {
+    console.error("order delete failed", err);
+  }
+}
+
+async function loadOrders() {
+  try {
+    for (const row of await kvAll("order:")) {
+      const p = JSON.parse(row.data) as PendingOrder;
+      orders.set(p.extRef, p);
+      orders.set(p.paymentId, p);
+    }
+    console.log(`Loaded ${orders.size / 2} pending order(s) from Turso`);
+  } catch (err) {
+    console.error("Failed to load pending orders", err);
+  }
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -71,7 +111,7 @@ function findPendingByPaymentId(paymentId: string): PendingOrder | undefined {
 function publicRaffle(lang: string) {
   const r = getRaffle();
   if (!r) return null;
-  pruneReservations(r);
+  pruneReservations();
   const pt = lang === "pt";
   return {
     id: r.id,
@@ -145,7 +185,8 @@ onRaffleDrawn((drawn) => {
   notifyRaffleEnded(drawn);
 });
 
-// Commit sold numbers once a payment is approved.
+// Commit sold numbers once a payment is approved. Idempotent: the guard on
+// pending.status ensures webhook + client polling can't double-commit.
 function onApproved(extRef: string) {
   const pending = orders.get(extRef);
   if (!pending || pending.status === "approved") return;
@@ -166,6 +207,39 @@ function onApproved(extRef: string) {
       raffleTitle: r.title,
       myRafflesUrl: `https://${process.env.PUBLIC_HOST ?? "localhost:3000"}${myRafflesPath(user.code)}`,
     }).catch(() => {});
+  } else {
+    console.warn(
+      `Approved payment ${pending.paymentId} has no matching active raffle (${pending.raffleId}); participation not recorded`
+    );
+  }
+  removeOrder(pending);
+}
+
+// A payment that was rejected/cancelled releases its reserved numbers.
+function onRejected(paymentId: string) {
+  const pending = findPendingByPaymentId(paymentId);
+  if (!pending) return;
+  pending.status = "rejected";
+  releaseNumbers(pending.numbers);
+  removeOrder(pending);
+}
+
+// Re-check every pending order against Mercado Pago. This is the safety net for
+// webhooks that never arrive (missed/delayed), so approved/rejected payments
+// are still settled promptly.
+async function reconcileOrders() {
+  const seen = new Set<string>();
+  for (const p of orders.values()) {
+    if (seen.has(p.paymentId)) continue;
+    seen.add(p.paymentId);
+    if (p.status === "approved" || p.status === "rejected" || p.status === "cancelled") continue;
+    try {
+      const status = await getPaymentStatusById(p.paymentId);
+      if (status === "approved") onApproved(p.extRef);
+      else if (status === "rejected" || status === "cancelled") onRejected(p.paymentId);
+    } catch (err) {
+      console.error(`Reconcile failed for payment ${p.paymentId}:`, err);
+    }
   }
 }
 
@@ -177,7 +251,20 @@ async function handle(req: Request): Promise<Response> {
     }
 
     if (req.method === "GET" && url.pathname === "/api/health") {
-      return json({ ok: true, hasToken: !!process.env.MP_ACCESS_TOKEN });
+      let dbOk = true;
+      try {
+        await db.execute("SELECT 1");
+      } catch {
+        dbOk = false;
+      }
+      const r = getRaffle();
+      return json({
+        ok: true,
+        hasToken: !!process.env.MP_ACCESS_TOKEN,
+        db: dbOk,
+        raffleId: r?.id ?? null,
+        pendingOrders: orders.size / 2,
+      });
     }
 
     // Public: current raffle (single raffle only)
@@ -185,12 +272,25 @@ async function handle(req: Request): Promise<Response> {
       return json({ raffle: publicRaffle(url.searchParams.get("lang") ?? "en") });
     }
 
-    // Public: "My raffles" — code-actuated login from the participation email
+    // Public: "My raffles" — code (alias) or email-actuated login
     if (req.method === "GET" && url.pathname === "/api/me") {
       const code = url.searchParams.get("code") ?? "";
-      if (!code) return json({ error: "missing code" }, 400);
-      const user = getUserByCode(code);
-      if (!user) return json({ error: "invalid or expired link" }, 404);
+      const email = (url.searchParams.get("email") ?? "").trim().toLowerCase();
+
+      let user: UserRecord | undefined;
+      if (email) {
+        user = getUserByEmail(email);
+        if (!user) {
+          // Email is an alias for the code: an email with no participations yet
+          // still yields an (empty) result so the page doesn't 404.
+          return json({ ok: true, user: { name: email, email, raffles: [] } });
+        }
+      } else if (code) {
+        user = getUserByCode(code);
+        if (!user) return json({ error: "invalid or expired link" }, 404);
+      } else {
+        return json({ error: "missing code or email" }, 400);
+      }
 
       const current = getRaffle();
       const history = getHistory();
@@ -309,17 +409,7 @@ async function handle(req: Request): Promise<Response> {
         return json({ error: "invalid raffle data" }, 400);
       }
       const prev = getRaffle();
-      if (prev && prev.sold.length > 0) {
-        addToHistory({
-          id: prev.id,
-          title: prev.title,
-          prize: prev.prize,
-          soldCount: prev.sold.length,
-          winnerNumber: prev.winner?.number ?? null,
-          createdAt: prev.createdAt,
-          endedAt: Date.now(),
-        });
-      }
+      if (prev) archiveCurrentForAdmin(prev);
       const r = createRaffle({ title, titlePt, prize, prizePt, price, currency, ticketCount });
       return json({ ok: true, raffle: { id: r.id, title: r.title } });
     }
@@ -367,6 +457,7 @@ async function handle(req: Request): Promise<Response> {
         };
         orders.set(extRef, pending);
         orders.set(paymentId, pending);
+        await saveOrder(pending);
 
         return json({
           id: paymentId,
@@ -389,6 +480,8 @@ async function handle(req: Request): Promise<Response> {
         if (status === "approved") {
           const pending = findPendingByPaymentId(id) ?? orders.get(id);
           if (pending) onApproved(pending.extRef);
+        } else if (status === "rejected" || status === "cancelled") {
+          onRejected(id);
         }
         return json({ id, status });
       } catch (err: any) {
@@ -424,6 +517,8 @@ async function handle(req: Request): Promise<Response> {
         if (status === "approved") {
           const pending = findPendingByPaymentId(id) ?? orders.get(id);
           if (pending) onApproved(pending.extRef);
+        } else if (status === "rejected" || status === "cancelled") {
+          onRejected(id);
         }
         return json({ ok: true, status });
       } catch (err: any) {
@@ -434,11 +529,57 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "not found" }, 404);
 }
 
+const RECONCILE_MS = 60_000;
+let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+
 // reload persisted raffle on boot and re-arm auto-draw if it filled while offline
-const boot = getRaffle();
-if (boot && isFull(boot) && !boot.winner) {
-  drawNow(boot); // archives the drawn raffle, starts the replacement, notifies
+async function bootstrap() {
+  try {
+    await loadStorage();
+    await loadRaffleFromDb();
+    await loadReservations();
+    await loadOrders();
+    void reconcileOrders();
+  } catch (err) {
+    console.error("Storage init failed", err);
+  }
+  const boot = getRaffle();
+  if (boot && isFull(boot) && !boot.winner) {
+    drawNow(boot); // archives the drawn raffle, starts the replacement, notifies
+  }
+  server.listen(PORT, () => {
+    console.log(`Rifa API server listening on http://localhost:${PORT}`);
+  });
+  reconcileTimer = setInterval(() => void reconcileOrders(), RECONCILE_MS);
 }
+
+bootstrap();
+
+// Crash resilience: log (and keep running) on unhandled async errors.
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
+// Graceful shutdown: flush all pending DB writes then close the server.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal} — flushing storage and shutting down…`);
+  try {
+    await Promise.all([flushSaves(), flushDb()]);
+  } catch (err) {
+    console.error("Flush during shutdown failed:", err);
+  }
+  if (reconcileTimer) clearInterval(reconcileTimer);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 8000).unref();
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
 
 // Node HTTP server (no Bun/docker needed). Adapts node:http to the fetch-style
 // handler above so the same logic runs on Render's Node runtime.
@@ -484,8 +625,4 @@ export const server = createServer((req, res) => {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "bad request" }));
   });
-});
-
-server.listen(PORT, () => {
-  console.log(`Rifa API server listening on http://localhost:${PORT}`);
 });

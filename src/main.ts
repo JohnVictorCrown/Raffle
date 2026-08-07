@@ -37,7 +37,7 @@ const params = new URLSearchParams(window.location.search);
 if (path.startsWith("/withdraw")) {
   new WithdrawOverlay(uiSlot, params.get("token") ?? "").start();
 } else if (path.startsWith("/me")) {
-  new MyRafflesOverlay(uiSlot, params.get("code") ?? "").start();
+  new MyRafflesOverlay(uiSlot, params.get("code") ?? "", params.get("email") ?? "").start();
 } else if (path.startsWith("/admin")) {
   const admin = new AdminOverlay(uiSlot);
   admin.start();

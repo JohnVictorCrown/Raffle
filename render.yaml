@@ -37,6 +37,10 @@ envVarGroups:
         sync: false
       - key: VITE_API_URL
         sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
 
 services:
   # ----- Backend (Node web service) -----

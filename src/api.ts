@@ -120,8 +120,9 @@ export interface MyRaffles {
   raffles: MyRaffleEntry[];
 }
 
-export async function getMyRaffles(code: string): Promise<MyRaffles> {
-  const res = await request<{ ok: boolean; user: MyRaffles }>(`/me?code=${encodeURIComponent(code)}`);
+export async function getMyRaffles(code: string, email?: string): Promise<MyRaffles> {
+  const q = code ? `?code=${encodeURIComponent(code)}` : email ? `?email=${encodeURIComponent(email)}` : "";
+  const res = await request<{ ok: boolean; user: MyRaffles }>(`/me${q}`);
   return res.user;
 }
 

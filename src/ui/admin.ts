@@ -65,8 +65,6 @@ export class AdminOverlay {
       { key: "prize", label: L.prizeLabel, ph: L.prizePh },
       { key: "titlePt", label: L.titlePtLabel, ph: L.titlePtPh },
       { key: "prizePt", label: L.prizePtLabel, ph: L.prizePtPh },
-      { key: "count", label: L.countLabel, ph: L.countPh },
-      { key: "price", label: L.priceLabel, ph: L.pricePh },
     ];
     const values: Record<string, HTMLInputElement> = {};
     for (const f of fields) {
@@ -79,6 +77,23 @@ export class AdminOverlay {
       values[f.key] = input;
       form.appendChild(row);
     }
+
+    // Numeric share settings (count + price) in a compact side-by-side row so
+    // the price per share is always visible without scrolling.
+    const numRow = this.el("div", "field-row");
+    const mkNum = (key: "count" | "price", label: string, ph: string, inputmode: "numeric" | "decimal") => {
+      const row = this.el("label", "field");
+      row.appendChild(this.el("span", "field-label", label));
+      const input = this.el("input", "input");
+      input.inputMode = inputmode;
+      input.placeholder = ph;
+      row.appendChild(input);
+      values[key] = input;
+      numRow.appendChild(row);
+    };
+    mkNum("count", L.countLabel, L.countPh, "numeric");
+    mkNum("price", L.priceLabel, L.pricePh, "decimal");
+    form.appendChild(numRow);
 
     const curRow = this.el("label", "field");
     curRow.appendChild(this.el("span", "field-label", L.currencyLabel));

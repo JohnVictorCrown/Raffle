@@ -7,6 +7,9 @@ import { buildFooter } from "./footer";
 const POLL_MS = 3000;
 
 export class RifaOverlay {
+  // Minimum time the boot screen (lion + spinner + audio) stays visible so it
+  // reads as an intentional startup sequence rather than a quick flash.
+  private static readonly MIN_BOOT_MS = 1800;
   private root: HTMLElement;
   private selSet = new Set<number>();
 
@@ -23,6 +26,8 @@ export class RifaOverlay {
 
   private pollTimer: number | null = null;
   private paymentPollTimer: number | null = null;
+  private bootAt: number | null = null;
+  private bootTimer: number | null = null;
   private paying = false;
   private paymentCanceled = false;
   private lastShownPlayed = "";
@@ -63,13 +68,17 @@ export class RifaOverlay {
     try {
       r = await getRaffle(store.state.lang);
       this.online = true;
+      this.loading = false; // leave the boot screen only once we connect
     } catch {
       r = null;
       this.online = false;
+      // keep `loading` true so the boot spinner (lion + spinner + audio) stays
     }
     if (r) this.raffle = r;
-    this.loading = false;
     this.updateConn();
+    // While a payment modal is open, never rebuild: a poll re-render would
+    // wipe the modal (and closing it). The modal stays until closed manually.
+    if (this.paying) return;
     // Only rebuild when the underlying raffle actually changed, so the poll
     // doesn't wipe the page (and the email input) while the user types.
     const current = r ?? this.raffle;
@@ -109,12 +118,45 @@ export class RifaOverlay {
     this.built = true;
     const L = this.L();
 
+    // Boot screen: show ONLY the lion + spinner (audio plays separately from
+    // main.ts) until we connect to the backend — and for a minimum duration so
+    // the boot is actually seen instead of flashing past.
+    if (this.loading) {
+      if (this.bootAt === null) this.bootAt = Date.now();
+      this.buildBoot();
+      return;
+    }
+    if (this.bootAt !== null) {
+      const elapsed = Date.now() - this.bootAt;
+      if (elapsed < RifaOverlay.MIN_BOOT_MS) {
+        this.buildBoot();
+        if (this.bootTimer === null) {
+          const wait = RifaOverlay.MIN_BOOT_MS - elapsed;
+          this.bootTimer = window.setTimeout(() => {
+            this.bootTimer = null;
+            this.build();
+          }, wait);
+        }
+        return;
+      }
+      this.bootAt = null;
+    }
+
     const strip = this.el("div", "strip");
     this.root.appendChild(strip);
 
     const topBar = this.el("div", "topbar");
     const langBtn = this.el("button", "lang-btn", (store.state.lang === "en" ? "pt" : "en").toUpperCase());
     langBtn.onclick = () => store.setLang(store.state.lang === "en" ? "pt" : "en");
+
+    const supportBtn = document.createElement("a");
+    supportBtn.className = "lang-btn support-btn";
+    supportBtn.href = "https://www.stellarium.ddns-ip.net/contact";
+    supportBtn.target = "_blank";
+    supportBtn.rel = "noopener";
+    supportBtn.title = L.supportTitle ?? "Support";
+    supportBtn.setAttribute("aria-label", "Support chat");
+    supportBtn.textContent = "💬";
 
     const titleGroup = this.el("div", "title-group");
     const brand = this.el("div", "brand", L.brand);
@@ -133,23 +175,12 @@ export class RifaOverlay {
     topBar.appendChild(connChip);
 
     topBar.appendChild(langBtn);
+    topBar.appendChild(supportBtn);
     this.root.appendChild(topBar);
 
     this.root.appendChild(buildFooter(L));
 
     this.updateConn();
-
-    if (this.loading) {
-      const wait = this.el("div", "panel setup");
-      const box = this.el("div", "conn-large");
-      const bigSpin = this.el("span", "spinner");
-      const bigLabel = this.el("div", "conn-label", L.connConnecting);
-      box.appendChild(bigSpin);
-      box.appendChild(bigLabel);
-      wait.appendChild(box);
-      this.root.appendChild(wait);
-      return;
-    }
 
     // show drawing state first if it's happening
     if ((this.raffle?.drawing || false) && !this.raffle?.winner) {
@@ -167,6 +198,20 @@ export class RifaOverlay {
     }
 
     this.showRaffle();
+  }
+
+  private buildBoot() {
+    const L = this.L();
+    const boot = this.el("div", "boot");
+    const img = this.el("img", "boot-lion");
+    img.src = lionImg;
+    img.alt = "";
+    const spin = this.el("span", "spinner boot-spin");
+    const label = this.el("div", "boot-label", L.connConnecting);
+    boot.appendChild(img);
+    boot.appendChild(spin);
+    boot.appendChild(label);
+    this.root.appendChild(boot);
   }
 
   private showRaffle() {
@@ -489,6 +534,7 @@ export class RifaOverlay {
   destroy() {
     if (this.pollTimer) window.clearTimeout(this.pollTimer);
     if (this.paymentPollTimer) window.clearTimeout(this.paymentPollTimer);
+    if (this.bootTimer) window.clearTimeout(this.bootTimer);
     this.root.remove();
   }
 }

@@ -79,6 +79,9 @@ interface Messages {
   meNoRaffles: string;
   meNumbers: string;
   meResult: string;
+  meEmailLabel: string;
+  meEmailPh: string;
+  meEmailBtn: string;
   meWon: string;
   meLost: string;
   mePending: string;
@@ -86,6 +89,7 @@ interface Messages {
   footerTrust: string;
   footerSecurity: string;
   footerFoundation: string;
+  supportTitle: string;
   wdTitle: string;
   wdPrize: string;
   wdPayout: string;
@@ -180,6 +184,9 @@ export const messages: Record<Language, Messages> = {
     meNoRaffles: "You haven't participated in any raffles yet.",
     meNumbers: "Numbers",
     meResult: "Result",
+    meEmailLabel: "Enter your email to see your raffles and results",
+    meEmailPh: "your@email.com",
+    meEmailBtn: "Look up my raffles",
     meWon: "Won",
     meLost: "Didn't win",
 mePending: "In progress",
@@ -187,6 +194,7 @@ mePending: "In progress",
     footerTrust: "Open source — auditable & transparent.",
     footerSecurity: "Protected by Mercado Pago • PIX",
     footerFoundation: "A share of every raffle supports the Stellar Foundation.",
+    supportTitle: "Support chat",
     wdTitle: "Withdraw Prize",
     wdPrize: "Prize",
     wdPayout: "Prize payout",
@@ -277,6 +285,9 @@ mePending: "In progress",
     meNoRaffles: "Você ainda não participou de nenhuma rifa.",
     meNumbers: "Números",
     meResult: "Resultado",
+    meEmailLabel: "Digite seu e-mail para ver suas rifas e resultados",
+    meEmailPh: "voce@email.com",
+    meEmailBtn: "Ver minhas rifas",
     meWon: "Ganhou",
     meLost: "Não ganhou",
     mePending: "Em andamento",
@@ -284,6 +295,7 @@ mePending: "In progress",
     footerTrust: "Código aberto — auditável e transparente.",
     footerSecurity: "Pagamentos seguros por Mercado Pago • PIX",
     footerFoundation: "Parte de cada rifa apoia a Fundação Stellar.",
+    supportTitle: "Chat de suporte",
     wdTitle: "Retirar Prêmio",
     wdPrize: "Prêmio",
     wdPayout: "Pagamento do prêmio",

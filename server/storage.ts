@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import crypto from "node:crypto";
+import { initDb, kvGet, kvSet, kvAll } from "./db";
 
 export interface Participation {
   raffleId: string;
@@ -32,37 +33,69 @@ export interface PastRaffle {
   endedAt: number;
 }
 
-const DATA_DIR = join(process.cwd(), "server", "data");
-const FILE_USERS = join(DATA_DIR, "users.json");
-const FILE_HISTORY = join(DATA_DIR, "history.json");
+const FILE_USERS = join(process.cwd(), "server", "data", "users.json");
+const FILE_HISTORY = join(process.cwd(), "server", "data", "history.json");
 
-function read<T>(file: string, fallback: T): T {
+let users: Record<string, UserRecord> = {};
+let history: PastRaffle[] = [];
+
+// Load persisted users/history from the Turso kv table. On first run (empty DB)
+// it migrates any existing JSON files so no data is lost.
+export async function loadStorage(): Promise<void> {
+  await initDb();
+
+  users = {};
+  history = [];
+
   try {
-    if (!existsSync(file)) return fallback;
-    return JSON.parse(readFileSync(file, "utf-8")) as T;
-  } catch {
-    return fallback;
+    for (const row of await kvAll("user:")) {
+      const key = row.key.slice("user:".length);
+      users[key] = JSON.parse(row.data) as UserRecord;
+    }
+    for (const row of await kvAll("hist:")) {
+      history.push(JSON.parse(row.data) as PastRaffle);
+    }
+    history.sort((a, b) => a.endedAt - b.endedAt);
+  } catch (err) {
+    console.error("Failed to read storage from Turso, starting fresh", err);
+  }
+
+  // one-time migration of legacy JSON files
+  if (Object.keys(users).length === 0 && existsSync(FILE_USERS)) {
+    try {
+      const old = JSON.parse(readFileSync(FILE_USERS, "utf-8")) as Record<string, UserRecord>;
+      for (const [key, u] of Object.entries(old)) {
+        users[key] = u;
+        await kvSet(`user:${key}`, u);
+      }
+    } catch {}
+  }
+  if (history.length === 0 && existsSync(FILE_HISTORY)) {
+    try {
+      const old = JSON.parse(readFileSync(FILE_HISTORY, "utf-8")) as PastRaffle[];
+      history = old.sort((a, b) => a.endedAt - b.endedAt);
+      for (const h of history) await kvSet(`hist:${h.id}`, h);
+    } catch {}
   }
 }
 
-function write(file: string, value: unknown) {
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(value, null, 2));
+/** Deterministic, stable code derived from the email (an alias for the email).
+ *  The same email always maps to the same code, so a code can be recovered from
+ *  an email (and email can be used directly to look up a user's history). */
+export function aliasCode(email: string): string {
+  return crypto.createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 32);
 }
-
-let users: Record<string, UserRecord> = read<Record<string, UserRecord>>(FILE_USERS, {});
-let history: PastRaffle[] = read<PastRaffle[]>(FILE_HISTORY, []);
 
 export function ensureUser(email: string, name: string): UserRecord {
   const key = email.trim().toLowerCase();
   let user = users[key];
   if (!user) {
-    user = { email: key, name: name.trim() || key, code: crypto.randomUUID(), createdAt: Date.now(), raffles: [] };
+    user = { email: key, name: name.trim() || key, code: aliasCode(key), createdAt: Date.now(), raffles: [] };
     users[key] = user;
-    persistUsers();
+    persistUser(key);
   } else if (name.trim() && user.name !== name.trim()) {
     user.name = name.trim();
-    persistUsers();
+    persistUser(key);
   }
   return user;
 }
@@ -71,7 +104,7 @@ export function ensureUser(email: string, name: string): UserRecord {
 export function recordParticipation(email: string, name: string, p: Participation): UserRecord {
   const user = ensureUser(email, name);
   user.raffles.push(p);
-  persistUsers();
+  persistUser(email.trim().toLowerCase());
   return user;
 }
 
@@ -88,7 +121,7 @@ export function getUserByEmail(email: string): UserRecord | undefined {
 
 export function addToHistory(r: PastRaffle) {
   history.push(r);
-  persistHistory();
+  void kvSet(`hist:${r.id}`, r).catch((err) => console.error("history save failed", err));
 }
 
 export function getHistory(): PastRaffle[] {
@@ -105,16 +138,12 @@ export function markWinnerPaid(token: string): boolean {
   const h = history.find((x) => x.winner?.token === token);
   if (h && h.winner) {
     h.winner.paid = true;
-    persistHistory();
+    void kvSet(`hist:${h.id}`, h).catch((err) => console.error("history save failed", err));
     return true;
   }
   return false;
 }
 
-function persistUsers() {
-  write(FILE_USERS, users);
-}
-
-function persistHistory() {
-  write(FILE_HISTORY, history);
+function persistUser(key: string) {
+  void kvSet(`user:${key}`, users[key]).catch((err) => console.error("user save failed", err));
 }
