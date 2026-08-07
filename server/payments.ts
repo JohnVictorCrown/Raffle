@@ -1,4 +1,4 @@
-import { MercadoPagoConfig, Payment } from "mercadopago";
+import { MercadoPagoConfig, Payment, PaymentRefund } from "mercadopago";
 import type { Options } from "mercadopago/dist/types";
 import type { PaymentCreateRequest } from "mercadopago/dist/clients/payment/create/types";
 import type { PaymentResponse } from "mercadopago/dist/clients/payment/commonTypes";
@@ -103,6 +103,30 @@ export async function getPaymentStatusById(paymentId: string): Promise<string> {
 
 export function getPendingOrder(id: string): PendingOrder | undefined {
   return orders.get(id);
+}
+
+/**
+ * Refund a payment we can no longer fulfill (the order expired, or the raffle
+ * was replaced before the payment was approved). Without `amount` a full
+ * refund is issued; with `amount` a partial one — used when a late payment
+ * under-fulfills: the buyer keeps the numbers they got and gets back what they
+ * paid for the rest. Best-effort: resolves with ok on success, or an error.
+ */
+export async function refundPixPayment(paymentId: string, amount?: number): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const refund = new PaymentRefund(getClient());
+    if (amount !== undefined) {
+      await refund.create({ payment_id: paymentId, body: { amount } });
+      console.log(`[mp] partial refund of ${amount} issued for payment ${paymentId}`);
+    } else {
+      await refund.total({ payment_id: paymentId });
+      console.log(`[mp] refund issued for payment ${paymentId}`);
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.error(`[mp] refund failed for payment ${paymentId}:`, err?.message ?? err);
+    return { ok: false, error: err?.message ?? String(err) };
+  }
 }
 
 /**

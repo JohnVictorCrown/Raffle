@@ -1,4 +1,4 @@
-import { createPixOrder, getPaymentStatusById, processPixPayout } from "./payments";
+import { createPixOrder, getPaymentStatusById, processPixPayout, refundPixPayment } from "./payments";
 import { WebhookSignatureValidator } from "mercadopago";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
@@ -51,12 +51,30 @@ interface PendingOrder {
   email: string;
   name: string;
   amount: number;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status: "pending" | "approved" | "rejected" | "cancelled" | "expired" | "refunded";
   createdAt: number;
+  expiresAt: number;
+  resolvedAt?: number;
 }
+
+// How long a PIX order may stay pending before it is considered abandoned
+// (holds released, order reaped). Longer than the 15-min reservation hold so a
+// slow payer isn't cut off mid-payment; overridable via ORDER_TTL_MINUTES.
+const ttlMinutes = Number(process.env.ORDER_TTL_MINUTES ?? 30);
+const ORDER_TTL_MS = Math.max(5 * 60_000, (Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : 30) * 60_000);
+
+// Final statuses that never need a refund: the payment was fulfilled
+// (approved) or no money moved (rejected/cancelled/refunded). Used to keep
+// in-memory `orders` bounded and to ignore duplicate/retried notifications for
+// payments we already handled.
+const FULFILLED: ReadonlySet<PendingOrder["status"]> = new Set(["approved", "rejected", "cancelled", "refunded"]);
 
 // orders keyed by external_reference and by payment id
 const orders = new Map<string, PendingOrder>();
+
+// Payment ids already resolved (fulfilled or refunded). Late or duplicate
+// webhooks/polls for these are no-ops instead of double-committing/refunding.
+const settled = new Set<string>();
 
 // Pending orders are persisted to Turso so an approved webhook is still
 // registered even after a restart, and re-indexed in memory on boot.
@@ -68,24 +86,41 @@ async function saveOrder(p: PendingOrder) {
   }
 }
 
-async function removeOrder(p: PendingOrder) {
+/**
+ * Finalize an order: remove it from memory, keep a tombstone in Turso so a
+ * late/duplicate notification still knows the outcome, and record fulfilled
+ * payments in `settled`. "expired" is deliberately NOT settled: an approved
+ * payment for an expired order must still reach the orphan-refund path.
+ */
+async function resolveOrder(p: PendingOrder, status: PendingOrder["status"]) {
+  p.status = status;
+  p.resolvedAt = Date.now();
   orders.delete(p.extRef);
   orders.delete(p.paymentId);
+  if (FULFILLED.has(status)) settled.add(p.paymentId);
   try {
-    await kvDelete(`order:${p.paymentId}`);
+    await kvSet(`order:${p.paymentId}`, p);
   } catch (err) {
-    console.error("order delete failed", err);
+    console.error("order save failed", err);
   }
 }
 
 async function loadOrders() {
+  orders.clear();
+  settled.clear();
   try {
     for (const row of await kvAll("order:")) {
       const p = JSON.parse(row.data) as PendingOrder;
-      orders.set(p.extRef, p);
-      orders.set(p.paymentId, p);
+      if (p.status === "pending") {
+        orders.set(p.extRef, p);
+        orders.set(p.paymentId, p);
+      } else if (FULFILLED.has(p.status)) {
+        settled.add(p.paymentId);
+      }
+      // "expired" tombstones are intentionally ignored: a late approval for
+      // them must still reach the orphan-refund path after a restart.
     }
-    console.log(`Loaded ${orders.size / 2} pending order(s) from Turso`);
+    console.log(`Loaded ${orders.size / 2} pending order(s) from Turso (+${settled.size} settled)`);
   } catch (err) {
     console.error("Failed to load pending orders", err);
   }
@@ -104,13 +139,13 @@ function readBody(req: Request): Promise<Record<string, any>> {
 
 /**
  * Public base URL for links in emails (participation / winner / result).
- * Resolution order: PUBLIC_HOST (frontend domain) → CORS_ORIGIN (frontend
+ * Resolution order: HOST (frontend domain) → CORS_ORIGIN (frontend
  * origin, used as a fallback) → http://localhost:3000 (local dev only).
- * Ensures a production deploy with PUBLIC_HOST unset never emails localhost
+ * Ensures a production deploy with HOST unset never emails localhost
  * links when CORS_ORIGIN is configured.
  */
 function publicBase(): string {
-  const host = (process.env.PUBLIC_HOST ?? "").trim();
+  const host = (process.env.HOST ?? "").trim();
   if (host) return `https://${host.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
   const origin = (process.env.CORS_ORIGIN ?? "").trim();
   if (origin && origin !== "*") return origin.replace(/\/+$/, "");
@@ -202,60 +237,144 @@ onRaffleDrawn((drawn) => {
 });
 
 // Commit sold numbers once a payment is approved. Idempotent: the guard on
-// pending.status ensures webhook + client polling can't double-commit.
+// pending.status ensures webhook + client polling can't double-commit. An
+// approval that can no longer be fulfilled (raffle replaced, or every number
+// sold to someone else while pending) issues a refund instead of letting the
+// buyer pay for nothing.
 function onApproved(extRef: string) {
   const pending = orders.get(extRef);
   if (!pending || pending.status === "approved") return;
   pending.status = "approved";
   const r = getRaffle();
+  let refunded = false;
   if (r && r.id === pending.raffleId) {
-    commitSale(r, pending.numbers, pending.email, pending.name);
-    const user = recordParticipation(pending.email, pending.name, {
-      raffleId: r.id,
-      title: r.title,
-      numbers: pending.numbers,
-      amount: pending.amount,
-      at: Date.now(),
-    });
-    sendParticipationEmail({
-      email: user.email,
-      name: user.name,
-      raffleTitle: r.title,
-      myRafflesUrl: `${publicBase()}${myRafflesPath(user.code)}`,
-    }).catch(() => {});
+    // commitSale only commits numbers still unsold — a late payment may have
+    // lost some to other buyers, so the returned subset is the truth.
+    const committed = commitSale(r, pending.numbers, pending.email, pending.name);
+    if (committed.length > 0) {
+      const missing = pending.numbers.length - committed.length;
+      if (missing > 0) {
+        // Under-fulfillment: some numbers were sold to other buyers while this
+        // payment was pending — refund what they paid for the ones they lost.
+        const refundAmount = Math.round(r.price * missing * 100) / 100;
+        console.warn(
+          `Payment ${pending.paymentId} under-fulfilled (${committed.length}/${pending.numbers.length} numbers) — refunding ${refundAmount}`
+        );
+        void refundPixPayment(pending.paymentId, refundAmount);
+      }
+      const user = recordParticipation(pending.email, pending.name, {
+        raffleId: r.id,
+        title: r.title,
+        numbers: committed,
+        amount: pending.amount,
+        at: Date.now(),
+      });
+      sendParticipationEmail({
+        email: user.email,
+        name: user.name,
+        raffleTitle: r.title,
+        myRafflesUrl: `${publicBase()}${myRafflesPath(user.code)}`,
+      }).catch(() => {});
+    } else {
+      console.warn(
+        `Approved payment ${pending.paymentId} has no available numbers (sold while pending) — refunding`
+      );
+      void refundPixPayment(pending.paymentId);
+      refunded = true;
+    }
   } else {
     console.warn(
-      `Approved payment ${pending.paymentId} has no matching active raffle (${pending.raffleId}); participation not recorded`
+      `Approved payment ${pending.paymentId} has no matching active raffle (${pending.raffleId}) — refunding`
     );
+    void refundPixPayment(pending.paymentId);
+    refunded = true;
   }
-  removeOrder(pending);
+  void resolveOrder(pending, refunded ? "refunded" : "approved");
 }
 
 // A payment that was rejected/cancelled releases its reserved numbers.
 function onRejected(paymentId: string) {
   const pending = findPendingByPaymentId(paymentId);
   if (!pending) return;
-  pending.status = "rejected";
   releaseNumbers(pending.numbers);
-  removeOrder(pending);
+  void resolveOrder(pending, "rejected");
+}
+
+// A pending order past its TTL is abandoned: release the holds and drop the
+// order. If the buyer pays afterwards, the orphan-approval path refunds them.
+function expireOrder(p: PendingOrder) {
+  console.warn(`Order ${p.paymentId} expired (${p.numbers.length} hold(s) released)`);
+  releaseNumbers(p.numbers);
+  void resolveOrder(p, "expired");
+}
+
+// An approved payment with no active order: either its order expired (reaped)
+// or it was never created by us. Either way it can't be fulfilled, so refund
+// it — unless it is already settled (a duplicate notification for a payment we
+// already handled).
+async function handleOrphanApproved(paymentId: string) {
+  if (settled.has(paymentId)) return;
+  settled.add(paymentId); // guard against concurrent webhook + poll double-refund
+  console.warn(`Approved payment ${paymentId} has no active order — refunding (cannot fulfill)`);
+  const res = await refundPixPayment(paymentId);
+  if (!res.ok) {
+    console.error(`[refund] MANUAL ACTION REQUIRED: payment ${paymentId} could not be refunded (${res.error}).`);
+  }
+  try {
+    await kvSet(`order:${paymentId}`, { paymentId, status: "refunded", resolvedAt: Date.now() });
+  } catch (err) {
+    console.error("order save failed", err);
+  }
 }
 
 // Re-check every pending order against Mercado Pago. This is the safety net for
 // webhooks that never arrive (missed/delayed), so approved/rejected payments
-// are still settled promptly.
+// are still settled promptly. Also acts as the TTL reaper: a pending order
+// past its expiry is dropped and its holds released.
+let lastOrderPrune = 0;
 async function reconcileOrders() {
   const seen = new Set<string>();
+  const expired: PendingOrder[] = [];
   for (const p of orders.values()) {
     if (seen.has(p.paymentId)) continue;
     seen.add(p.paymentId);
-    if (p.status === "approved" || p.status === "rejected" || p.status === "cancelled") continue;
+    if (p.status !== "pending") continue;
     try {
       const status = await getPaymentStatusById(p.paymentId);
-      if (status === "approved") onApproved(p.extRef);
-      else if (status === "rejected" || status === "cancelled") onRejected(p.paymentId);
+      if (status === "approved") {
+        onApproved(p.extRef);
+        continue;
+      }
+      if (status === "rejected" || status === "cancelled") {
+        onRejected(p.paymentId);
+        continue;
+      }
     } catch (err) {
       console.error(`Reconcile failed for payment ${p.paymentId}:`, err);
     }
+    const deadline = p.expiresAt ?? p.createdAt + ORDER_TTL_MS;
+    if (deadline <= Date.now()) expired.push(p);
+  }
+  for (const p of expired) expireOrder(p);
+  void maybePruneResolvedOrders();
+}
+
+// Drop old resolved-order tombstones from Turso so the boot scan stays small.
+// Runs at most every 6 hours. `settled` is left intact so duplicate
+// notifications within this process still no-op.
+async function maybePruneResolvedOrders() {
+  if (Date.now() - lastOrderPrune < 6 * 3_600_000) return;
+  lastOrderPrune = Date.now();
+  try {
+    const cutoff = Date.now() - 30 * 24 * 3_600_000;
+    for (const row of await kvAll("order:")) {
+      const p = JSON.parse(row.data) as PendingOrder;
+      if (p.status !== "pending" && (p.resolvedAt ?? 0) < cutoff) {
+        await kvDelete(`order:${p.paymentId}`);
+      }
+    }
+  } catch (err) {
+    console.error("failed to prune resolved orders", err);
   }
 }
 
@@ -470,6 +589,7 @@ async function handle(req: Request): Promise<Response> {
           amount: total,
           status: "pending",
           createdAt: Date.now(),
+          expiresAt: Date.now() + ORDER_TTL_MS,
         };
         orders.set(extRef, pending);
         orders.set(paymentId, pending);
@@ -496,6 +616,7 @@ async function handle(req: Request): Promise<Response> {
         if (status === "approved") {
           const pending = findPendingByPaymentId(id) ?? orders.get(id);
           if (pending) onApproved(pending.extRef);
+          else void handleOrphanApproved(id);
         } else if (status === "rejected" || status === "cancelled") {
           onRejected(id);
         }
@@ -533,6 +654,7 @@ async function handle(req: Request): Promise<Response> {
         if (status === "approved") {
           const pending = findPendingByPaymentId(id) ?? orders.get(id);
           if (pending) onApproved(pending.extRef);
+          else void handleOrphanApproved(id);
         } else if (status === "rejected" || status === "cancelled") {
           onRejected(id);
         }
@@ -581,15 +703,15 @@ async function bootstrap() {
         " EMAIL=" + has("EMAIL") +
         " EMAIL_P=" + has("EMAIL_P") +
         " BREVO_API_KEY=" + has("BREVO_API_KEY") +
-        " PUBLIC_HOST=" + (process.env.PUBLIC_HOST || "(default)") +
+        " HOST=" + (process.env.HOST || "(default)") +
         " PORT=" + (process.env.PORT ?? "(default)")
     );
-    const pubHost = (process.env.PUBLIC_HOST ?? "").trim();
+    const pubHost = (process.env.HOST ?? "").trim();
     const corsOrigin = (process.env.CORS_ORIGIN ?? "").trim();
     if (!pubHost && (!corsOrigin || corsOrigin === "*")) {
       console.warn(
-        "[config] PUBLIC_HOST is not set — participation/winner emails will link to http://localhost:3000 " +
-          "instead of your domain. Set PUBLIC_HOST (e.g. raffle-oqkf.onrender.com) in the raffle env group on Render."
+        "[config] HOST is not set — participation/winner emails will link to http://localhost:3000 " +
+          "instead of your domain. Set HOST (e.g. raffle-oqkf.onrender.com) in the raffle env group on Render."
       );
     }
   });

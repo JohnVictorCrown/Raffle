@@ -180,22 +180,34 @@ export function releaseNumbers(numbers: number[]) {
   saveReservations();
 }
 
-/** Commit paid numbers (already reserved) to the raffle; triggers a win when the raffle is full. */
-export function commitSale(r: Raffle, numbers: number[], email: string, name?: string) {
-  let changed = false;
+/**
+ * Commit paid numbers (already reserved) to the raffle; triggers a win when the
+ * raffle is full. Returns the numbers that were actually committed: a late
+ * payment (after its hold expired) may find some numbers already sold to
+ * someone else, and those are silently skipped. Callers must record
+ * participation with the returned subset only.
+ */
+export function commitSale(r: Raffle, numbers: number[], email: string, name?: string): number[] {
+  const committed: number[] = [];
+  const now = Date.now();
   for (const n of numbers) {
     if (r.sold.some((s) => s.number === n)) continue;
-    r.sold.push({ number: n, email, name: name?.trim() || "", amount: r.price, at: Date.now() });
+    // Never take a number another buyer currently holds — their unexpired hold
+    // means they were told it was available and may still pay for it.
+    const held = reserved.get(n);
+    if (held && held.expiresAt >= now && held.email !== email) continue;
+    r.sold.push({ number: n, email, name: name?.trim() || "", amount: r.price, at: now });
     reserved.delete(n);
-    changed = true;
+    committed.push(n);
   }
-  if (changed) {
+  if (committed.length > 0) {
     // holds won't release reservations for these; drop reservations
     r.sold.sort((a, b) => a.number - b.number);
     persist(r);
     saveReservations();
     maybeScheduleDraw(r);
   }
+  return committed;
 }
 
 export function isFull(r: Raffle): boolean {
