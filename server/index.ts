@@ -20,6 +20,7 @@ import {
   type Raffle,
 } from "./raffle";
 import { sendWinnerEmail, prizeClaimPath, sendParticipationEmail, sendResultEmail, myRafflesPath } from "./email";
+import { runStartupChecks } from "./startup-checks";
 import {
   recordParticipation,
   getUserByCode,
@@ -535,6 +536,7 @@ let reconcileTimer: ReturnType<typeof setInterval> | null = null;
 // reload persisted raffle on boot and re-arm auto-draw if it filled while offline
 async function bootstrap() {
   try {
+    await runStartupChecks();
     await loadStorage();
     await loadRaffleFromDb();
     await loadReservations();
