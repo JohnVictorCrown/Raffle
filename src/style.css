@@ -282,7 +282,7 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 560px;
+  width: min(560px, calc(100vw - 32px));
 }
 
 .form {
@@ -769,25 +769,58 @@ select.input {
 @media (max-width: 820px) {
   .ui {
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    /* Room so the pinned footer never covers the last content row. */
+    padding-bottom: 64px;
   }
 
+  /* Top bar participates in the column flow; no more fixed 96px offset. */
+  .topbar {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    height: 84px;
+    flex: none;
+  }
+
+  /* Admin / my raffles / withdraw pages: content starts right under the bar. */
+  .admin-body {
+    top: 84px;
+  }
+
+  /* Raffle card + countdown flow naturally below the bar. */
   .info-col {
-    top: 96px;
-    left: 12px;
-    right: 12px;
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
     width: auto;
+    margin: 0 12px;
   }
 
   .info-col .info {
     padding: 14px;
   }
 
+  /* Number grid takes the remaining space below the card; cells scroll. */
   .grid-area {
-    top: 364px;
-    left: 12px;
-    right: 12px;
-    bottom: 96px;
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    margin: 12px;
     padding: 14px;
+    min-height: 360px;
+    flex: 1 1 auto;
+    display: flex;
+  }
+
+  .grid-area > .grid {
+    flex: 1;
+    height: auto;
   }
 
   .raffle-img {
@@ -827,14 +860,93 @@ select.input {
     font-size: 11px;
   }
 
-  /* Payment / setup modals should fit small screens too. */
+  /* Payment / setup modals: pin to the viewport, fit small screens. */
+  .modal {
+    position: fixed;
+    inset: 0;
+  }
+
   .modal-card {
     width: 92vw;
     max-width: 460px;
   }
 
-  .modal-input {
+  .modal-input,
+  .qr-code {
     width: 100%;
     max-width: none;
+  }
+
+  /* Keep form controls at ≥16px so iOS doesn't auto-zoom on focus. */
+  .input,
+  .buy-name,
+  .btn {
+    font-size: 16px;
+  }
+}
+
+/* Small phones: keep the top bar from colliding with the side chips. */
+@media (max-width: 480px) {
+  .topbar {
+    height: 76px;
+    padding: 0 8px;
+  }
+
+  .brand {
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55vw;
+  }
+
+  .tagline {
+    display: none;
+  }
+
+  .conn {
+    left: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  .conn .conn-label {
+    max-width: 64px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lang-btn {
+    right: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .support-btn {
+    right: 56px;
+    padding: 4px 8px;
+    font-size: 15px;
+  }
+
+  .info-col {
+    margin: 0 8px;
+  }
+
+  .grid-area {
+    margin: 8px;
+  }
+}
+
+/* Very narrow phones: drop the decorative support icon so the brand, status
+   chip and language button all fit without colliding. */
+@media (max-width: 400px) {
+  .support-btn {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-body {
+    top: 76px;
   }
 }
