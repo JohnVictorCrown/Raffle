@@ -1,34 +1,33 @@
-# Render blueprint (render.yaml)
-# Deploys TWO separate services:
-#   1. rifa-api  : the Node backend (Mercado Pago API + single-raffle state) as a plain Node web service.
-#   2. rifa-web  : the static SPA frontend (dist/) pointing at the API.
-#
-# After the services are created, point the frontend at the API by setting
-# VITE_API_URL (e.g. https://rifa-api.onrender.com) and set CORS_ORIGIN on the
-# API to the frontend origin (e.g. https://rifa-web.onrender.com). See README.
+# Render blueprint — links the "raffle" Environment Group (evg-d9r0s7u1egvs73bdi51g)
+# to both services, so all backend variables live in one place.
 
-services:
-  # ----- Backend (Node, no Docker) -----
-  - type: web
-    name: rifa-api
-    runtime: node
-    buildCommand: npm install
-    startCommand: npm run server:node
-    healthCheckPath: /api/health
+version: "1"
+
+# Environment Group "raffle" — values are kept in Render (sync: false).
+envVarGroups:
+  - name: raffle
     envVars:
-      - key: PORT
-        value: 3001
-      - key: ADMIN_PASSWORD
-        sync: false
-      - key: CORS_ORIGIN
-        sync: false
-      - key: PUBLIC_HOST
-        sync: false
       - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_PUBLIC_KEY
         sync: false
       - key: MP_NOTIFICATION_URL
         sync: false
       - key: MP_WEBHOOK_SECRET
+        sync: false
+      - key: MP_WEBHOOK_TOLERANCE
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PUBLIC_HOST
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PORT
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
         sync: false
       - key: EMAIL_USER
         sync: false
@@ -37,19 +36,29 @@ services:
       - key: EMAIL_FROM
         sync: false
 
+services:
+  # ----- Backend (Node web service) -----
+  - type: web
+    name: Raffle-web
+    runtime: node
+    repo: https://github.com/JohnVictorCrown/Raffle
+    plan: free
+    region: virginia
+    buildCommand: bun install
+    startCommand: bun run server:node
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - fromGroup: raffle
+
   # ----- Frontend (static site) -----
   - type: web
-    name: rifa-web
+    name: Raffle
     runtime: static
-    buildCommand: npm install && npm run build:web
-    staticPublishPath: ./dist
-    buildFilter:
-      paths:
-        - src/**
-        - public/**
-        - index.html
-        - package.json
-        - vite.config.ts
+    repo: https://github.com/JohnVictorCrown/Raffle
+    buildCommand: bun install && bun run build:web
+    staticPublishPath: dist
+    autoDeployTrigger: commit
     envVars:
       - key: VITE_API_URL
         sync: false
