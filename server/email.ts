@@ -57,8 +57,18 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
       }
     });
 
-    socket.on("error", (err) => {
-      console.error(`[email] SMTP error to ${to}: ${err?.message ?? err}`);
+    socket.on("error", (err: any) => {
+      console.error(
+        `[email] SMTP error to ${to}:`,
+        JSON.stringify({
+          code: err?.code,
+          errno: err?.errno,
+          syscall: err?.syscall,
+          address: err?.address,
+          port: err?.port,
+          message: err?.message ?? String(err),
+        })
+      );
       if (pending) pending.resolve("");
       resolve(false);
     });
