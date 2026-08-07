@@ -151,15 +151,25 @@ export function availableCount(r: Raffle): number {
 }
 
 export function isAvailable(r: Raffle, n: number): boolean {
-  return availableNumbers(r).includes(n);
+  if (r.sold.some((s) => s.number === n)) return false;
+  const held = reserved.get(n);
+  return !held || held.expiresAt < Date.now();
 }
 
-/** Mark numbers as reserved so two buyers don't pick the same one. */
+/**
+ * Mark numbers as reserved so two buyers don't pick the same one. A number
+ * already held by the SAME email (or whose hold has expired) is considered
+ * available again, so an abandoned or failed attempt never bricks a buyer out
+ * of re-picking their own numbers. The hold TTL is refreshed on re-reserve.
+ */
 export function reserveNumbers(r: Raffle, numbers: number[], email: string, ttlMs = 15 * 60_000): boolean {
+  const now = Date.now();
+  const expiresAt = now + ttlMs;
   for (const n of numbers) {
-    if (!isAvailable(r, n)) return false;
+    if (r.sold.some((s) => s.number === n)) return false;
+    const held = reserved.get(n);
+    if (held && held.expiresAt >= now && held.email !== email) return false;
   }
-  const expiresAt = Date.now() + ttlMs;
   for (const n of numbers) reserved.set(n, { email, expiresAt });
   saveReservations();
   return true;
