@@ -20,15 +20,25 @@ function loadDotEnv(file) {
   }
 }
 
-const value =
-  (process.env.VITE_API_URL ?? "").trim() ||
-  loadDotEnv(".env.production").VITE_API_URL ||
-  loadDotEnv(".env").VITE_API_URL ||
-  "";
+// Vite's precedence: a var already present in process.env is used even if empty
+// and is NOT overwritten by .env files. So `hasOwn` (defined-but-empty) alone
+// suppresses .env.production. Mirror that exactly.
+const hasEnv = Object.prototype.hasOwnProperty.call(process.env, "VITE_API_URL");
+const value = hasEnv
+  ? (process.env.VITE_API_URL ?? "").trim()
+  : loadDotEnv(".env.production").VITE_API_URL || loadDotEnv(".env").VITE_API_URL || "";
 const u = value.replace(/\/+$/g, "");
 
-console.log("[build] VITE_API_URL = " + JSON.stringify(value || "(NOT SET)"));
-console.log("[build] baked base     = " + (u ? "//" + u : "(SAME ORIGIN)"));
+console.log("[build] VITE_API_URL (effective) = " + JSON.stringify(value || "(NOT SET)"));
+if (hasEnv) {
+  console.log(
+    "[build]   ^ comes from process.env; this OVERRIDES .env.production" +
+      (value ? "" : " (it is currently EMPTY!)")
+  );
+} else {
+  console.log("[build]   ^ read from .env.production");
+}
+console.log("[build] baked base         = " + (u ? "//" + u : "(SAME ORIGIN)"));
 if (!value) {
   console.warn(
     ">> WARNING: VITE_API_URL is empty — the frontend will call /api on its own domain " +
