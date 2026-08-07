@@ -7,11 +7,11 @@ version: "1"
 envVarGroups:
   - name: raffle
     envVars:
-      - key: MP_ACCESS_TOKEN
+      - key: MP_TOKEN
         sync: false
       - key: MP_PUBLIC_KEY
         sync: false
-      - key: MP_NOTIFICATION_URL
+      - key: MP_URL
         sync: false
       - key: MP_WEBHOOK_SECRET
         sync: false

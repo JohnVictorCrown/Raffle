@@ -15,7 +15,7 @@ A 3D lion-themed raffle game (Rifa) built with **Bun**, **Three.js** (3D renderi
 
 ```bash
 bun install                # install dependencies
-cp .env.example .env       # then add your MP_ACCESS_TOKEN (and MP_NOTIFICATION_URL)
+cp .env.example .env       # then add your MP_TOKEN (and MP_URL)
 bun run server             # start the Mercado Pago API server (port 3001)
 bun run dev                # start the Vite dev server with /api proxy (port 3000)
 ```
@@ -24,8 +24,8 @@ bun run dev                # start the Vite dev server with /api proxy (port 300
 
 ### Mercado Pago
 
-- Create a paid application at https://www.mercadopago.com/developers and copy an **access token** (`MP_ACCESS_TOKEN`).
-- `MP_NOTIFICATION_URL` must be a publicly reachable URL for webhook notifications (or rely on client polling, which the app also does).
+- Create a paid application at https://www.mercadopago.com/developers and copy an **access token** (`MP_TOKEN`).
+- `MP_URL` must be a publicly reachable URL for webhook notifications (or rely on client polling, which the app also does).
 - Payment status is polled every ~2.5s; on `approved` the purchased numbers are reserved.
 
 ## Commands
@@ -63,11 +63,11 @@ A `render.yaml` blueprint is included — create a new Render **Blueprint**, sel
 ### 1. Backend (`rifa-api`)
 - Runs as a plain **Node** web service (via `tsx`); no Docker.
 - Set in the Render dashboard under *Environment*:
-  - `MP_ACCESS_TOKEN` → your Mercado Pago access token
+  - `MP_TOKEN` → your Mercado Pago access token
   - `ADMIN_PASSWORD` → admin password
   - `PUBLIC_HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links)
   - `CORS_ORIGIN` → the **frontend** origin, e.g. `https://rifa-web.onrender.com` (must be an exact origin, not `*`, when deploying apart)
-  - `MP_NOTIFICATION_URL` → `https://rifa-api.onrender.com/api/webhooks` (reachable HTTPS endpoint)
+  - `MP_URL` → `https://rifa-api.onrender.com/api/webhooks` (reachable HTTPS endpoint)
   - `EMAIL_USER` / `EMAIL_PASS` / `EMAIL_FROM` (Gmail app password) as needed
 - `PORT` defaults to `3001`; Render injects its own `PORT` if you keep it synced.
 - Local Node run (no Bun): `npm run server:node`

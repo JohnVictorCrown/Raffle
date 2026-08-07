@@ -15,10 +15,10 @@ export interface PendingOrder {
 const orders = new Map<string, PendingOrder>();
 
 function getClient(): MercadoPagoConfig {
-  const accessToken = process.env.MP_ACCESS_TOKEN;
+  const accessToken = process.env.MP_TOKEN;
   if (!accessToken) {
     throw new Error(
-      "Mercado Pago is not configured. Set MP_ACCESS_TOKEN (a TEST-… or APP_USR-… token) in your .env file, then restart the server."
+      "Mercado Pago is not configured. Set MP_TOKEN (a TEST-… or APP_USR-… token) in your .env file, then restart the server."
     );
   }
   return new MercadoPagoConfig({ accessToken });
@@ -59,8 +59,8 @@ export async function createPixOrder(opts: CreatePixOrderOpts): Promise<{
     },
     // Webhook URL — required in production so Mercado Pago notifies us (and we
     // register the sale) even if the client closes the tab after scanning.
-    ...(process.env.MP_NOTIFICATION_URL
-      ? { notification_url: process.env.MP_NOTIFICATION_URL }
+    ...(process.env.MP_URL
+      ? { notification_url: process.env.MP_URL }
       : {}),
   };
 
@@ -117,8 +117,8 @@ export async function processPixPayout(opts: {
   pixKeyType: "email" | "cpf" | "phone" | "random";
   description: string;
 }): Promise<{ ok: boolean; id?: string; status?: string; error?: string }> {
-  const token = process.env.MP_ACCESS_TOKEN;
-  if (!token) return { ok: false, error: "MP_ACCESS_TOKEN is not configured." };
+  const token = process.env.MP_TOKEN;
+  if (!token) return { ok: false, error: "MP_TOKEN is not configured." };
 
   try {
     const res = await fetch("https://api.mercadopago.com/v1/payments", {

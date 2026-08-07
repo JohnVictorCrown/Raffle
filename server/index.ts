@@ -260,7 +260,7 @@ async function handle(req: Request): Promise<Response> {
       const r = getRaffle();
       return json({
         ok: true,
-        hasToken: !!process.env.MP_ACCESS_TOKEN,
+        hasToken: !!process.env.MP_TOKEN,
         db: dbOk,
         raffleId: r?.id ?? null,
         pendingOrders: orders.size / 2,
@@ -556,8 +556,8 @@ async function bootstrap() {
           : "EMPTY-BUT-PRESENT"
         : "unset";
     console.log(
-      "[env] MP_ACCESS_TOKEN=" + has("MP_ACCESS_TOKEN") +
-        " MP_NOTIFICATION_URL=" + has("MP_NOTIFICATION_URL") +
+      "[env] MP_TOKEN=" + has("MP_TOKEN") +
+        " MP_URL=" + has("MP_URL") +
         " ADMIN_PASSWORD=" + has("ADMIN_PASSWORD") +
         " TURSO_URL=" + has("TURSO_URL") +
         " TURSO_TOKEN=" + has("TURSO_TOKEN") +
