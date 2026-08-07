@@ -549,19 +549,19 @@ async function bootstrap() {
   }
   server.listen(PORT, () => {
     console.log(`Rifa API server listening on http://localhost:${PORT}`);
+    const has = (k: string) =>
+      Object.prototype.hasOwnProperty.call(process.env, k)
+        ? process.env[k]
+          ? "SET(" + String(process.env[k]).slice(0, 10) + "…)"
+          : "EMPTY-BUT-PRESENT"
+        : "unset";
     console.log(
-      "[env] MP_ACCESS_TOKEN=" +
-        (process.env.MP_ACCESS_TOKEN ? "SET(" + process.env.MP_ACCESS_TOKEN.slice(0, 10) + "…)" : "unset") +
-        " MP_NOTIFICATION_URL=" +
-        (process.env.MP_NOTIFICATION_URL ? "SET" : "unset") +
-        " ADMIN_PASSWORD=" +
-        (process.env.ADMIN_PASSWORD ? "SET" : "unset") +
-        " TURSO_URL=" +
-        (process.env.TURSO_URL ? "SET" : "unset") +
-        " TURSO_TOKEN=" +
-        (process.env.TURSO_TOKEN || process.env.TURSO_AUTH_TOKEN ? "SET" : "unset") +
-        " PORT=" +
-        (process.env.PORT ?? "(default)")
+      "[env] MP_ACCESS_TOKEN=" + has("MP_ACCESS_TOKEN") +
+        " MP_NOTIFICATION_URL=" + has("MP_NOTIFICATION_URL") +
+        " ADMIN_PASSWORD=" + has("ADMIN_PASSWORD") +
+        " TURSO_URL=" + has("TURSO_URL") +
+        " TURSO_TOKEN=" + has("TURSO_TOKEN") +
+        " PORT=" + (process.env.PORT ?? "(default)")
     );
   });
   reconcileTimer = setInterval(() => void reconcileOrders(), RECONCILE_MS);
