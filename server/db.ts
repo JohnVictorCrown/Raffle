@@ -1,18 +1,16 @@
 import { createClient, type Client, type Row } from "@libsql/client";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 
-function localUrl(): string {
-  const dir = join(process.cwd(), "server", "data");
-  mkdirSync(dir, { recursive: true });
-  return "file:" + join(dir, "rifa.db").replace(/\\/g, "/");
+// Turso (remote) is the ONLY datastore — there is no local file fallback.
+// One of TURSO_DATABASE_URL or TURSO_URL (+ their token aliases) is required;
+// if missing the server refuses to start so we never silently diverge from
+// production data.
+const url = (process.env.TURSO_DATABASE_URL ?? process.env.TURSO_URL ?? "").trim();
+if (!url) {
+  throw new Error(
+    "Turso is the only datastore. Set TURSO_URL (or TURSO_DATABASE_URL) (+ a token) in the environment; refusing to start with no remote database."
+  );
 }
-
-// Turso remote database when configured, otherwise a local libSQL file so local
-// development keeps working with zero setup. On Render the filesystem is
-// ephemeral, so production must supply TURSO_DATABASE_URL (+ auth token).
-const url = process.env.TURSO_DATABASE_URL?.trim() || localUrl();
-const authToken = process.env.TURSO_AUTH_TOKEN?.trim() || undefined;
+const authToken = (process.env.TURSO_AUTH_TOKEN ?? process.env.TURSO_TOKEN ?? "").trim() || undefined;
 
 export const db: Client = createClient(authToken ? { url, authToken } : { url });
 
