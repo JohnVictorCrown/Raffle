@@ -22,8 +22,12 @@ export interface PastRaffle {
   id: string;
   title: string;
   prize: string;
+  prizePt?: string;
   soldCount: number;
+  raised?: number;
   winnerNumber: number | null;
+  winner?: { number: number; email: string; name?: string; token: string; at: number; paid?: boolean } | null;
+  sold?: { number: number; email: string; name: string; amount: number; at: number }[];
   createdAt: number;
   endedAt: number;
 }
@@ -89,6 +93,22 @@ export function addToHistory(r: PastRaffle) {
 
 export function getHistory(): PastRaffle[] {
   return history;
+}
+
+/** Find a drawn raffle (past) by its winner's claim token. */
+export function findDrawnByToken(token: string): PastRaffle | undefined {
+  return history.find((h) => h.winner?.token === token);
+}
+
+/** Mark the winner of a drawn raffle as paid (persisted). */
+export function markWinnerPaid(token: string): boolean {
+  const h = history.find((x) => x.winner?.token === token);
+  if (h && h.winner) {
+    h.winner.paid = true;
+    persistHistory();
+    return true;
+  }
+  return false;
 }
 
 function persistUsers() {

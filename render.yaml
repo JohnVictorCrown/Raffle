@@ -1,0 +1,57 @@
+# Render blueprint (render.yaml)
+# Deploys TWO separate services:
+#   1. rifa-api  : the Node backend (Mercado Pago API + single-raffle state) as a plain Node web service.
+#   2. rifa-web  : the static SPA frontend (dist/) pointing at the API.
+#
+# After the services are created, point the frontend at the API by setting
+# VITE_API_URL (e.g. https://rifa-api.onrender.com) and set CORS_ORIGIN on the
+# API to the frontend origin (e.g. https://rifa-web.onrender.com). See README.
+
+services:
+  # ----- Backend (Node, no Docker) -----
+  - type: web
+    name: rifa-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run server:node
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PUBLIC_HOST
+        sync: false
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_NOTIFICATION_URL
+        sync: false
+      - key: MP_WEBHOOK_SECRET
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  # ----- Frontend (static site) -----
+  - type: web
+    name: rifa-web
+    runtime: static
+    plan: free
+    buildCommand: npm install && npm run build:web
+    publishPath: ./dist
+    buildFilter:
+      paths:
+        - src/**
+        - public/**
+        - index.html
+        - package.json
+        - vite.config.ts
+    envVars:
+      - key: VITE_API_URL
+        sync: false

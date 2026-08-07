@@ -12,6 +12,8 @@ export class RifaOverlay {
 
   private raffle: PublicRaffle | null = null;
   private loading = true;
+  private online: boolean | null = null;
+  private connChip: HTMLElement | null = null;
 
   private lastKey = "";
   private built = false;
@@ -30,10 +32,11 @@ export class RifaOverlay {
     this.root.className = "ui";
     this.container.appendChild(this.root);
 
-    store.subscribe(() => this.build());
+    store.subscribe(() => this.refresh());
 
     this.refresh();
     this.asyncLoop();
+    this.build();
   }
 
   private L() {
@@ -58,21 +61,38 @@ export class RifaOverlay {
   private async refresh() {
     let r: PublicRaffle | null = null;
     try {
-      r = await getRaffle();
+      r = await getRaffle(store.state.lang);
+      this.online = true;
     } catch {
       r = null;
+      this.online = false;
     }
     if (r) this.raffle = r;
     this.loading = false;
+    this.updateConn();
     // Only rebuild when the underlying raffle actually changed, so the poll
     // doesn't wipe the page (and the email input) while the user types.
     const current = r ?? this.raffle;
     const key = current
-      ? `${current.soldCount}/${current.available}/${current.drawing}/${current.winner ? current.winner.at : 0}`
+      ? `${store.state.lang}/${current.soldCount}/${current.available}/${current.drawing}/${current.winner ? current.winner.at : 0}`
       : "none";
     if (!this.built || key !== this.lastKey) {
       this.lastKey = key;
       this.build();
+    }
+  }
+
+  private updateConn() {
+    if (!this.connChip) return;
+    const L = this.L();
+    const spin = this.connChip.querySelector<HTMLElement>(".spinner");
+    const label = this.connChip.querySelector<HTMLElement>(".conn-label");
+    this.connChip.classList.toggle("off", this.online === false);
+    this.connChip.classList.toggle("busy", this.online === null || this.online === false);
+    if (spin) spin.style.display = this.online === true ? "none" : "";
+    if (label) {
+      label.textContent =
+        this.online === false ? L.connOffline : this.online === null ? L.connConnecting : L.connOnline;
     }
   }
 
@@ -103,14 +123,30 @@ export class RifaOverlay {
     titleGroup.appendChild(tagline);
 
     topBar.appendChild(titleGroup);
+
+    const connChip = this.el("div", "conn");
+    const spin = this.el("span", "spinner");
+    const label = this.el("span", "conn-label", "");
+    connChip.appendChild(spin);
+    connChip.appendChild(label);
+    this.connChip = connChip;
+    topBar.appendChild(connChip);
+
     topBar.appendChild(langBtn);
     this.root.appendChild(topBar);
 
     this.root.appendChild(buildFooter(L));
 
+    this.updateConn();
+
     if (this.loading) {
       const wait = this.el("div", "panel setup");
-      wait.appendChild(this.el("div", "panel-title", "…"));
+      const box = this.el("div", "conn-large");
+      const bigSpin = this.el("span", "spinner");
+      const bigLabel = this.el("div", "conn-label", L.connConnecting);
+      box.appendChild(bigSpin);
+      box.appendChild(bigLabel);
+      wait.appendChild(box);
       this.root.appendChild(wait);
       return;
     }
@@ -152,7 +188,9 @@ export class RifaOverlay {
     };
     mk(L.availableName, `${available} ${L.freeNumbers}`, "text");
     mk(L.soldName, `${sold}/${raffle.ticketCount}`, "blue");
-    mk(L.raisedName, L.money(raised, raffle.currency), "gold");
+    const totalPrize = Math.round(raffle.ticketCount * raffle.price * 0.7 * 100) / 100;
+    mk(L.prizeAmountName, L.money(totalPrize, raffle.currency), "gold");
+    mk(L.raisedName, L.money(raised, raffle.currency), "text");
     this.root.appendChild(info);
 
     // number grid

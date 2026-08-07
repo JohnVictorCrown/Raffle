@@ -34,6 +34,7 @@ export interface PublicRaffle {
   available: number;
   soldNumbers: number[];
   soldCount: number;
+  prizeAmount: number;
   winner: WinnerInfo | null;
   drawing: boolean;
   exists: boolean;
@@ -44,7 +45,11 @@ export interface RaffleResponse {
   raffle: PublicRaffle | null;
 }
 
-const BASE = "/api";
+// Backend base URL. In dev/self-hosted the frontend proxies "/api" to the
+// Bun server. When deployed as a separate static site (e.g. Render), set
+// VITE_API_URL at build time to the backend origin, e.g. https://api.example.com.
+const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+const BASE = `${API_ORIGIN}/api`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init);
@@ -67,15 +72,18 @@ export function getPaymentStatus(id: string | number): Promise<PaymentStatus> {
   return request<PaymentStatus>(`/payments/${id}`);
 }
 
-export async function getRaffle(): Promise<PublicRaffle | null> {
-  const res = await request<RaffleResponse>("/raffle");
+export async function getRaffle(lang?: string): Promise<PublicRaffle | null> {
+  const q = lang ? `?lang=${encodeURIComponent(lang)}` : "";
+  const res = await request<RaffleResponse>(`/raffle${q}`);
   return res.raffle;
 }
 
 export function createAdminRaffle(input: {
   password: string;
   title: string;
+  titlePt?: string;
   prize: string;
+  prizePt?: string;
   price: number;
   currency: string;
   ticketCount: number;

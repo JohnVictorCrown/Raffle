@@ -3,11 +3,18 @@ export type Language = "en" | "pt";
 interface Messages {
   brand: string;
   tagline: string;
+  connConnecting: string;
+  connOnline: string;
+  connOffline: string;
   setupTitle: string;
   titleLabel: string;
   titlePh: string;
   prizeLabel: string;
   prizePh: string;
+  titlePtLabel: string;
+  titlePtPh: string;
+  prizePtLabel: string;
+  prizePtPh: string;
   countLabel: string;
   countPh: string;
   priceLabel: string;
@@ -19,6 +26,7 @@ interface Messages {
   availableName: string;
   soldName: string;
   raisedName: string;
+  prizeAmountName: string;
   chooseLabel: string;
   buyBtn: string;
   namePh: string;
@@ -96,11 +104,18 @@ export const messages: Record<Language, Messages> = {
   en: {
     brand: "Golden Lion Raffle",
     tagline: "Pick your lucky number and win the prize",
+    connConnecting: "Connecting…",
+    connOnline: "Online",
+    connOffline: "Offline",
     setupTitle: "New Raffle",
     titleLabel: "Raffle title",
     titlePh: "e.g. Beach trip",
     prizeLabel: "Prize",
     prizePh: "e.g. Vacation package",
+    titlePtLabel: "Title (Portuguese)",
+    titlePtPh: "e.g. Viagem para a praia",
+    prizePtLabel: "Prize (Portuguese)",
+    prizePtPh: "e.g. Pacote de férias",
     countLabel: "Number of tickets",
     countPh: "e.g. 50",
     priceLabel: "Price per ticket",
@@ -112,6 +127,7 @@ export const messages: Record<Language, Messages> = {
     availableName: "Available",
     soldName: "Sold",
     raisedName: "Raised",
+    prizeAmountName: "Prize value",
     chooseLabel: "Choose your number",
     buyBtn: "Buy Ticket",
     namePh: "Your name",
@@ -185,11 +201,18 @@ mePending: "In progress",
   pt: {
     brand: "Rifa Leão Dourado",
     tagline: "Escolha seu número da sorte e concorra ao prêmio",
+    connConnecting: "Conectando…",
+    connOnline: "Online",
+    connOffline: "Offline",
     setupTitle: "Nova Rifa",
     titleLabel: "Título da rifa",
     titlePh: "ex.: Viagem para a praia",
     prizeLabel: "Prêmio",
     prizePh: "ex.: Pacote de férias",
+    titlePtLabel: "Título (Português)",
+    titlePtPh: "ex.: Viagem para a praia",
+    prizePtLabel: "Prêmio (Português)",
+    prizePtPh: "ex.: Pacote de férias",
     countLabel: "Quantidade de números",
     countPh: "ex.: 50",
     priceLabel: "Preço do número",
@@ -201,6 +224,7 @@ mePending: "In progress",
     availableName: "Disponíveis",
     soldName: "Vendidos",
     raisedName: "Arrecadado",
+    prizeAmountName: "Valor do prêmio",
     chooseLabel: "Escolha seu número",
     buyBtn: "Comprar",
     namePh: "Seu nome",

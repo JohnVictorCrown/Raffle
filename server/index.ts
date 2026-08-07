@@ -1,5 +1,6 @@
 import { createPixOrder, getPaymentStatusById, processPixPayout } from "./payments";
 import { WebhookSignatureValidator } from "mercadopago";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   getRaffle,
   createRaffle,
@@ -11,9 +12,20 @@ import {
   drawNow,
   isFull,
   persist,
+  onRaffleDrawn,
+  type Raffle,
 } from "./raffle";
 import { sendWinnerEmail, prizeClaimPath, sendParticipationEmail, sendResultEmail, myRafflesPath } from "./email";
-import { recordParticipation, getUserByCode, getUserByEmail, addToHistory, getHistory } from "./storage";
+import {
+  recordParticipation,
+  getUserByCode,
+  getUserByEmail,
+  addToHistory,
+  getHistory,
+  findDrawnByToken,
+  markWinnerPaid,
+  type PastRaffle,
+} from "./storage";
 
 const PORT = Number(process.env.PORT ?? 3001);
 
@@ -56,20 +68,22 @@ function findPendingByPaymentId(paymentId: string): PendingOrder | undefined {
   return undefined;
 }
 
-function publicRaffle() {
+function publicRaffle(lang: string) {
   const r = getRaffle();
   if (!r) return null;
   pruneReservations(r);
+  const pt = lang === "pt";
   return {
     id: r.id,
-    title: r.title,
-    prize: r.prize,
+    title: pt && r.titlePt ? r.titlePt : r.title,
+    prize: pt && r.prizePt ? r.prizePt : r.prize,
     price: r.price,
     currency: r.currency,
     ticketCount: r.ticketCount,
     available: availableCount(r),
     soldNumbers: r.sold.map((s) => s.number),
     soldCount: r.sold.length,
+    prizeAmount: Math.round(r.ticketCount * r.price * 0.7 * 100) / 100,
     winner: r.winner
       ? { number: r.winner.number, email: r.winner.email, at: r.winner.at }
       : null,
@@ -81,24 +95,23 @@ function publicRaffle() {
 
 const notifiedRaffles = new Set<string>();
 
-function notifyRaffleEnded() {
-  const r = getRaffle();
-  if (!r?.winner || notifiedRaffles.has(r.id)) return;
-  notifiedRaffles.add(r.id);
+function notifyRaffleEnded(r: Raffle) {
+  if (!r?.winner || notifiedRaffles.has(r.winner.token)) return;
+  notifiedRaffles.add(r.winner.token);
 
   const raised = r.sold.reduce((a, s) => a + s.amount, 0);
   const payout = Math.round(raised * 0.7 * 100) / 100;
   const winnerNum = r.winner.number;
-  const winnerName = r.sold.find((s) => s.number === winnerNum)?.name || r.winner.email;
+  const winnerUser = getUserByEmail(r.winner.email);
+  const winnerName = winnerUser?.name || r.winner.name || r.winner.email;
 
   const base = `https://${process.env.PUBLIC_HOST ?? "localhost:3000"}`;
   const withdrawUrl = `${base}${prizeClaimPath(r.title, r.winner.token)}`;
 
   // Winner: withdraw instructions.
-  const winnerUser = getUserByEmail(r.winner.email);
   sendWinnerEmail({
     email: r.winner.email,
-    name: winnerUser?.name || winnerName,
+    name: winnerName,
     raffleTitle: r.title,
     amount: payout,
     withdrawUrl,
@@ -126,6 +139,12 @@ function notifyRaffleEnded() {
   }
 }
 
+// When a raffle is drawn it is immediately archived and replaced by a fresh
+// empty clone; notifications must therefore use the archived snapshot.
+onRaffleDrawn((drawn) => {
+  notifyRaffleEnded(drawn);
+});
+
 // Commit sold numbers once a payment is approved.
 function onApproved(extRef: string) {
   const pending = orders.get(extRef);
@@ -147,14 +166,11 @@ function onApproved(extRef: string) {
       raffleTitle: r.title,
       myRafflesUrl: `https://${process.env.PUBLIC_HOST ?? "localhost:3000"}${myRafflesPath(user.code)}`,
     }).catch(() => {});
-    notifyRaffleEnded();
   }
 }
 
-export const server = Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url);
+async function handle(req: Request): Promise<Response> {
+  const url = new URL(req.url);
 
     if (req.method === "OPTIONS") {
       return new Response(null, { headers: corsHeaders });
@@ -166,7 +182,7 @@ export const server = Bun.serve({
 
     // Public: current raffle (single raffle only)
     if (req.method === "GET" && url.pathname === "/api/raffle") {
-      return json({ raffle: publicRaffle() });
+      return json({ raffle: publicRaffle(url.searchParams.get("lang") ?? "en") });
     }
 
     // Public: "My raffles" — code-actuated login from the participation email
@@ -221,6 +237,17 @@ export const server = Bun.serve({
           paid: !!r.winner.paid,
         });
       }
+      const past = token ? findDrawnByToken(token) : undefined;
+      if (past && past.winner) {
+        return json({
+          ok: true,
+          number: past.winner.number,
+          prize: past.prize,
+          raffleTitle: past.title,
+          payout: Math.round((past.raised ?? past.soldCount * 0) * 0.7 * 100) / 100,
+          paid: !!past.winner.paid,
+        });
+      }
       return json({ error: "invalid or expired link" }, 404);
     }
 
@@ -236,12 +263,19 @@ export const server = Bun.serve({
         return json({ error: "token, pixKey and pixKeyType are required" }, 400);
       }
       const r = getRaffle();
-      if (!r?.winner || r.winner.token !== token) {
+      const drawn =
+        r && r.winner && r.winner.token === token
+          ? r
+          : findDrawnByToken(token) ?? null;
+      if (!drawn?.winner || drawn.winner.token !== token) {
         return json({ error: "invalid or expired link" }, 404);
       }
-      if (r.winner.paid) return json({ ok: true, alreadyPaid: true });
+      if (drawn.winner.paid) return json({ ok: true, alreadyPaid: true });
 
-      const raised = r.sold.reduce((a, s) => a + s.amount, 0);
+      const raised =
+        drawn === r
+          ? r.sold.reduce((a, s) => a + s.amount, 0)
+          : ((drawn as PastRaffle).raised ?? 0);
       const payout = Math.round(raised * 0.7 * 100) / 100;
       if (payout <= 0) return json({ error: "no funds to pay out" }, 400);
 
@@ -249,13 +283,17 @@ export const server = Bun.serve({
         transactionAmount: payout,
         pixKey,
         pixKeyType,
-        description: `Rifa payout: ${r.title}`,
+        description: `Rifa payout: ${drawn.title}`,
       });
       if (!result.ok) {
         return json({ ok: false, error: result.error ?? "Payout failed" }, 502);
       }
-      r.winner.paid = true;
-      persist(r);
+      if (drawn === r) {
+        drawn.winner.paid = true;
+        persist(r);
+      } else {
+        markWinnerPaid(token);
+      }
       return json({ ok: true, payoutId: result.id, status: result.status });
     }
 
@@ -266,7 +304,7 @@ export const server = Bun.serve({
       if (!body.password || body.password !== adminPass) {
         return json({ error: "wrong password" }, 401);
       }
-      const { title, prize, price, currency = "BRL", ticketCount } = body;
+      const { title, titlePt, prize, prizePt, price, currency = "BRL", ticketCount } = body;
       if (!title || !prize || typeof price !== "number" || price <= 0 || typeof ticketCount !== "number" || ticketCount < 1) {
         return json({ error: "invalid raffle data" }, 400);
       }
@@ -282,11 +320,11 @@ export const server = Bun.serve({
           endedAt: Date.now(),
         });
       }
-      const r = createRaffle({ title, prize, price, currency, ticketCount });
+      const r = createRaffle({ title, titlePt, prize, prizePt, price, currency, ticketCount });
       return json({ ok: true, raffle: { id: r.id, title: r.title } });
     }
 
-    // Create a PIX payment via the Orders API
+    // Create a PIX payment (Transparent Checkout) and hold it pending
     if (req.method === "POST" && url.pathname === "/api/payments") {
       const body = await readBody(req);
       const { email, numbers, name } = body as { email?: string; numbers?: number[]; name?: string };
@@ -394,14 +432,60 @@ export const server = Bun.serve({
     }
 
     return json({ error: "not found" }, 404);
-  },
-});
+}
 
 // reload persisted raffle on boot and re-arm auto-draw if it filled while offline
 const boot = getRaffle();
 if (boot && isFull(boot) && !boot.winner) {
-  drawNow(boot);
-  notifyRaffleEnded();
+  drawNow(boot); // archives the drawn raffle, starts the replacement, notifies
 }
 
-console.log(`Mercado Pago API server listening on http://localhost:${PORT}`);
+// Node HTTP server (no Bun/docker needed). Adapts node:http to the fetch-style
+// handler above so the same logic runs on Render's Node runtime.
+function toNodeRequest(req: IncomingMessage, body: Buffer): Request {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (v === undefined) continue;
+    if (Array.isArray(v)) {
+      for (const x of v) headers.append(k, x);
+    } else {
+      headers.append(k, v);
+    }
+  }
+  const method = (req.method ?? "GET").toUpperCase();
+  return new Request(url.toString(), {
+    method,
+    headers,
+    body: method === "GET" || method === "HEAD" || method === "OPTIONS" || body.length === 0 ? undefined : body,
+  });
+}
+
+async function writeResponse(res: ServerResponse, response: Response) {
+  res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+  const payload = response.body ? Buffer.from(await response.arrayBuffer()) : undefined;
+  res.end(payload);
+}
+
+export const server = createServer((req, res) => {
+  const chunks: Buffer[] = [];
+  req.on("data", (c: Buffer) => chunks.push(c));
+  req.on("end", () => {
+    const request = toNodeRequest(req, Buffer.concat(chunks));
+    handle(request)
+      .then((response) => writeResponse(res, response))
+      .catch((err: any) => {
+        console.error(err);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+      });
+  });
+  req.on("error", () => {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "bad request" }));
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Rifa API server listening on http://localhost:${PORT}`);
+});

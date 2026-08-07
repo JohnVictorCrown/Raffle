@@ -1,7 +1,7 @@
-import { MercadoPagoConfig, Order } from "mercadopago";
+import { MercadoPagoConfig, Payment } from "mercadopago";
 import type { Options } from "mercadopago/dist/types";
-import type { CreateOrderRequest } from "mercadopago/dist/clients/order/create/types";
-import type { OrderResponse } from "mercadopago/dist/clients/order/commonTypes";
+import type { PaymentCreateRequest } from "mercadopago/dist/clients/payment/create/types";
+import type { PaymentResponse } from "mercadopago/dist/clients/payment/commonTypes";
 
 export interface PendingOrder {
   orderId: string;
@@ -34,44 +34,28 @@ export interface CreatePixOrderOpts {
   buyer: string;
 }
 
-function firstPayment(of: OrderResponse) {
-  return of?.transactions?.payments?.[0];
-}
-
 /**
- * Creates a PIX payment via the Mercado Pago Orders API (Transparent Checkout).
- * The resulting order carries a single PIX transaction with QR data.
+ * Creates a PIX payment via the Mercado Pago Payments API (Transparent
+ * Checkout, `POST /v1/payments` with `payment_method_id: "pix"`). The result
+ * carries the QR data under `point_of_interaction.transaction_data`.
  */
 export async function createPixOrder(opts: CreatePixOrderOpts): Promise<{
-  order: OrderResponse;
+  order: PaymentResponse;
   paymentId: string;
   qrCode: string;
   qrCodeBase64: string;
   pending: PendingOrder;
 }> {
-  const order = new Order(getClient());
+  const payment = new Payment(getClient());
 
-  const body: CreateOrderRequest = {
-    type: "online",
-    external_reference: opts.externalReference,
+  const body: PaymentCreateRequest = {
+    transaction_amount: opts.transaction_amount,
     description: opts.description,
-    currency: "BRL",
-    total_amount: opts.transaction_amount.toFixed(2),
-    capture_mode: "automatic",
+    payment_method_id: "pix",
+    external_reference: opts.externalReference,
     payer: {
       email: opts.payerEmail,
       first_name: opts.payerName,
-    },
-    transactions: {
-      payments: [
-        {
-          amount: opts.transaction_amount.toFixed(2),
-          payment_method: {
-            type: "bank_transfer",
-            id: "pix",
-          },
-        },
-      ],
     },
   };
 
@@ -79,44 +63,37 @@ export async function createPixOrder(opts: CreatePixOrderOpts): Promise<{
     idempotencyKey: `${opts.externalReference}-${Date.now()}`,
   };
 
-  const res = await order.create({ body, requestOptions });
+  const res = await payment.create({ body, requestOptions });
 
-  const payment = firstPayment(res);
-  const paymentMethod = payment?.payment_method as { qr_code?: string; qr_code_base64?: string } | undefined;
-  const paymentId = String(payment?.id ?? res.id ?? "");
+  const tx = res?.point_of_interaction?.transaction_data as
+    | { qr_code?: string; qr_code_base64?: string }
+    | undefined;
+  const paymentId = String(res.id ?? "");
 
   const pending: PendingOrder = {
-    orderId: String(res.id ?? ""),
+    orderId: paymentId,
     paymentId,
-    status: String(payment?.status ?? res.status ?? "pending"),
+    status: String(res.status ?? "pending"),
     createdAt: Date.now(),
     numbers: opts.numbers,
     buyer: opts.buyer,
   };
-  orders.set(pending.orderId, pending);
   if (paymentId) orders.set(paymentId, pending);
 
   return {
     order: res,
     paymentId,
-    qrCode: paymentMethod?.qr_code ?? "",
-    qrCodeBase64: paymentMethod?.qr_code_base64 ?? "",
+    qrCode: tx?.qr_code ?? "",
+    qrCodeBase64: tx?.qr_code_base64 ?? "",
     pending,
   };
 }
 
-/** Fetch the current status of a payment by its payment id or order id. */
+/** Fetch the current status of a payment by its payment id. */
 export async function getPaymentStatusById(paymentId: string): Promise<string> {
-  const order = new Order(getClient());
-  // Accept both the payment id and the parent order id as lookup keys.
-  const pending =
-    orders.get(paymentId) ??
-    Array.from(orders.values()).find((o) => o.orderId === paymentId);
-  if (pending) {
-    const res = await order.get({ id: pending.orderId });
-    return String(firstPayment(res)?.status ?? "pending");
-  }
-  return "pending";
+  const payment = new Payment(getClient());
+  const res = await payment.get({ id: paymentId });
+  return String(res.status ?? "pending");
 }
 
 export function getPendingOrder(id: string): PendingOrder | undefined {

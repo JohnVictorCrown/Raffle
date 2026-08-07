@@ -63,6 +63,8 @@ export class AdminOverlay {
     const fields = [
       { key: "title", label: L.titleLabel, ph: L.titlePh },
       { key: "prize", label: L.prizeLabel, ph: L.prizePh },
+      { key: "titlePt", label: L.titlePtLabel, ph: L.titlePtPh },
+      { key: "prizePt", label: L.prizePtLabel, ph: L.prizePtPh },
       { key: "count", label: L.countLabel, ph: L.countPh },
       { key: "price", label: L.priceLabel, ph: L.pricePh },
     ];
@@ -108,6 +110,8 @@ export class AdminOverlay {
       e.preventDefault();
       const title = values.title.value.trim();
       const prize = values.prize.value.trim();
+      const titlePt = values.titlePt.value.trim();
+      const prizePt = values.prizePt.value.trim();
       const count = parseInt(values.count.value, 10);
       const price = parseFloat(values.price.value.replace(",", "."));
       if (!title || !prize || isNaN(count) || count < 1 || isNaN(price) || price <= 0) {
@@ -116,7 +120,7 @@ export class AdminOverlay {
         return;
       }
       try {
-        await createAdminRaffle({ password: pass.value, title, prize, price, currency: sel.value, ticketCount: count });
+        await createAdminRaffle({ password: pass.value, title, titlePt, prize, prizePt, price, currency: sel.value, ticketCount: count });
         msg.textContent = L.adminCreated;
         msg.classList.remove("err");
         this.raffle = await getRaffle();

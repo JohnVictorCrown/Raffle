@@ -12,6 +12,13 @@
   box-sizing: border-box;
 }
 
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 html,
 body,
 #app,
@@ -111,6 +118,64 @@ body {
   color: #fff2c8;
   font-weight: 700;
   cursor: pointer;
+}
+
+/* Backend connection status (banner). */
+.conn {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(27, 13, 56, 0.85);
+  border: 1px solid rgba(255, 202, 85, 0.35);
+  font-size: 12px;
+  font-weight: 700;
+  color: #00d26a;
+  white-space: nowrap;
+}
+
+.conn.busy {
+  color: #ffd25a;
+}
+
+.conn.off {
+  color: #ff4fa3;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 210, 90, 0.35);
+  border-top-color: #ffd25a;
+  animation: spin 0.8s linear infinite;
+}
+
+.conn-large {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 0;
+  color: #ffd25a;
+}
+
+.conn-large .spinner {
+  width: 40px;
+  height: 40px;
+  border-width: 4px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .panel {
@@ -442,6 +507,8 @@ select.input {
   justify-content: center;
   background: rgba(10, 5, 24, 0.6);
   z-index: 10;
+  overflow-y: auto;
+  padding: 16px;
 }
 
 .modal-card {
@@ -618,15 +685,38 @@ select.input {
   .grid-area {
     top: 300px;
     left: 12px;
-    right: 108px;
+    right: 12px;
     bottom: 96px;
     padding: 14px;
   }
 
   .raffle-img {
-    top: 300px;
-    right: 12px;
-    width: 84px;
+    display: none;
+  }
+
+  /* Buy controls: stack vertically, full-width, touch-friendly. */
+  .buybar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .buy-count {
+    min-width: 0;
+    text-align: center;
+  }
+
+  .buy-name {
+    flex: none;
+    width: 100%;
+    max-width: none;
+    font-size: 16px;
+  }
+
+  .buybar .btn-primary {
+    width: 100%;
+    padding: 14px 18px;
+    font-size: 16px;
   }
 
   .brand {
@@ -635,5 +725,16 @@ select.input {
 
   .tagline {
     font-size: 11px;
+  }
+
+  /* Payment / setup modals should fit small screens too. */
+  .modal-card {
+    width: 92vw;
+    max-width: 460px;
+  }
+
+  .modal-input {
+    width: 100%;
+    max-width: none;
   }
 }

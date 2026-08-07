@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import crypto from "node:crypto";
+import { addToHistory } from "./storage";
 
 export interface Sale {
   number: number;
@@ -13,13 +14,15 @@ export interface Sale {
 export interface Raffle {
   id: string;
   title: string;
+  titlePt: string;
   prize: string;
+  prizePt: string;
   price: number;
   currency: string;
   ticketCount: number;
   createdAt: number;
   sold: Sale[];
-  winner: { number: number; email: string; token: string; at: number; paid?: boolean } | null;
+  winner: { number: number; email: string; name?: string; token: string; at: number; paid?: boolean } | null;
   drawing: boolean; // true while a draw is scheduled/in progress
   sellsAt: number; // timestamp when the raffle filled up
 }
@@ -30,6 +33,14 @@ const FILE = join(DATA_DIR, "raffle.json");
 let current: Raffle | null = null;
 let drawTimer: ReturnType<typeof setTimeout> | null = null;
 
+type Drawer = (drawn: Raffle) => void;
+let onDraw: Drawer | null = null;
+
+/** Register a callback invoked right after a raffle is drawn (winner picked). */
+export function onRaffleDrawn(fn: Drawer) {
+  onDraw = fn;
+}
+
 // pending (reserved) numbers not yet paid — in-memory only
 const reserved = new Map<number, { email: string; expiresAt: number }>();
 
@@ -37,7 +48,9 @@ function emptyRaffle(): Raffle {
   return {
     id: String(Math.floor(Date.now() / 1000)),
     title: "",
+    titlePt: "",
     prize: "",
+    prizePt: "",
     price: 0,
     currency: "BRL",
     ticketCount: 0,
@@ -72,7 +85,9 @@ export function getRaffle(): Raffle | null {
 /** Replace the current (single) raffle, wiping sales/winner. */
 export function createRaffle(input: {
   title: string;
+  titlePt?: string;
   prize: string;
+  prizePt?: string;
   price: number;
   currency: string;
   ticketCount: number;
@@ -82,7 +97,9 @@ export function createRaffle(input: {
     ...emptyRaffle(),
     id: String(Math.floor(Date.now() / 1000)),
     title: input.title,
+    titlePt: input.titlePt?.trim() || "",
     prize: input.prize,
+    prizePt: input.prizePt?.trim() || "",
     price: input.price,
     currency: input.currency,
     ticketCount: input.ticketCount,
@@ -170,9 +187,40 @@ export function drawNow(r: Raffle) {
 function drawWinner(r: Raffle) {
   if (!r.sold.length || r.winner) return;
   const pick = r.sold[Math.floor(Math.random() * r.sold.length)];
-  r.winner = { number: pick.number, email: pick.email, token: crypto.randomUUID(), at: Date.now() };
+  r.winner = { number: pick.number, email: pick.email, name: pick.name, token: crypto.randomUUID(), at: Date.now(), paid: false };
   r.drawing = false;
   persist(r);
+  archiveAndRestart(r);
+  onDraw?.(r);
+}
+
+/**
+ * Archive the drawn raffle (full snapshot, winner + sales) into history, then
+ * start a brand-new empty raffle that clones the drawn one's settings.
+ */
+function archiveAndRestart(r: Raffle) {
+  addToHistory({
+    id: r.id,
+    title: r.title,
+    prize: r.prize,
+    prizePt: r.prizePt,
+    soldCount: r.sold.length,
+    raised: Math.round(r.sold.reduce((a, s) => a + s.amount, 0) * 100) / 100,
+    winnerNumber: r.winner?.number ?? null,
+    winner: r.winner,
+    sold: r.sold.map((s) => ({ number: s.number, email: s.email, name: s.name, amount: s.amount, at: s.at })),
+    createdAt: r.createdAt,
+    endedAt: Date.now(),
+  });
+  createRaffle({
+    title: r.title,
+    titlePt: r.titlePt,
+    prize: r.prize,
+    prizePt: r.prizePt,
+    price: r.price,
+    currency: r.currency,
+    ticketCount: r.ticketCount,
+  });
 }
 
 /** Prune expired reservations (kept on reads). */
