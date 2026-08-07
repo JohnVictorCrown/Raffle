@@ -35,6 +35,8 @@ envVarGroups:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: VITE_API_URL
+        sync: false
 
 services:
   # ----- Backend (Node web service) -----
@@ -60,5 +62,4 @@ services:
     staticPublishPath: dist
     autoDeployTrigger: commit
     envVars:
-      - key: VITE_API_URL
-        sync: false
+      - fromGroup: raffle
