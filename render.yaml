@@ -19,7 +19,7 @@ envVarGroups:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: PUBLIC_HOST
+      - key: HOST
         sync: false
       - key: CORS_ORIGIN
         sync: false
@@ -51,7 +51,7 @@ services:
   # Link ONLY the shared group. Do NOT add per-service env vars here: an empty
   # service-level value shadows the group's (same trap that broke VITE_API_URL).
   - type: web
-    name: Raffle-web
+    name: rifa-api
     runtime: node
     repo: https://github.com/JohnVictorCrown/Raffle
     plan: free
@@ -65,7 +65,7 @@ services:
 
   # ----- Frontend (static site) -----
   - type: web
-    name: Raffle
+    name: rifa-web
     runtime: static
     repo: https://github.com/JohnVictorCrown/Raffle
     buildCommand: bun install && bun run build:web

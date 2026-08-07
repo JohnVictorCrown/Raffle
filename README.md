@@ -1,13 +1,15 @@
 # Golden Lion Rifa
 
-A 3D lion-themed raffle game (Rifa) built with **Bun**, **Three.js** (3D rendering) and **Phaser 4** (UI/HUD). Bilingual — English and Portuguese — with **Mercado Pago PIX payments**.
+A lion-themed raffle web app (Rifa) — a vanilla TypeScript SPA on **Vite** that talks to a **Bun/Node** API, with **Mercado Pago PIX payments** and **Brevo** email delivery. Bilingual — English and Portuguese.
 
 ## Features
 
-- 3D stage with a stylized golden lion, a spinning, raffle drum and confetti
+- Golden-lion boot screen with background audio
 - Create a raffle (title, prize, number of tickets, price, currency)
-- Buy numbers via the **Mercado Pago PIX payment gateway** (QR code displayed, status polled, tickets reserved on approval)
-- Draw a winner with a live spin + drum animation
+- Buy numbers via the **Mercado Pago PIX payment gateway** (QR code displayed, status polled, numbers held/reserved on approval)
+- Auto-draw a winner with a random delay once the raffle sells out (winner + participants notified by email)
+- Winners withdraw their prize via PIX from a claim link emailed to them
+- "My raffles" page to track participations and results (by code or email)
 - Language toggle (English / Português)
 - Bright yellow-and-gold "tigrinho"-style theme over dark sub-tone panels
 
@@ -39,15 +41,24 @@ bun run preview   # preview production build
 
 ## Architecture
 
-- `src/three/world.ts` — Three.js scene (lion, drum, lights, confetti)
-- `src/phaser/ui.ts` — Phaser 4 UI (setup, number grid, stats, draw, payment modal)
-- `src/api.ts` — typed Mercado Pago API client (create payment, poll status)
-- `src/store.ts` — shared reactive state + event emitter
+- `src/main.ts` — entry point; mounts the right overlay per route (`/`, `/admin`, `/me`, `/withdraw`)
+- `src/ui/overlay.ts` — main buying UI (number grid, buy bar, PIX payment modal)
+- `src/ui/admin.ts` — admin page (create/replace the single raffle)
+- `src/ui/mepage.ts` — "My raffles" page
+- `src/ui/withdraw.ts` — prize withdrawal page (PIX key)
+- `src/api.ts` — typed API client (raffle, payments, claim, withdraw)
+- `src/store.ts` — shared language state + subscribers
 - `src/i18n.ts` — EN/PT-BR translations
-- `server/index.ts` — Bun HTTP server (payments, webhooks, orders)
-- `server/payments.ts` — Mercado Pago SDK wrapper (PIX)
+- `src/ui/footer.ts` — footer (trust/security/foundation links)
+- `server/index.ts` — HTTP server (payments, webhooks, order reconciliation, draw notifications)
+- `server/startup-checks.ts` — fail-fast boot checks (email + Mercado Pago)
+- `server/raffle.ts` — single-raffle lifecycle (holds, sales, auto-draw, archive)
+- `server/payments.ts` — Mercado Pago wrapper (PIX create, status, refunds)
+- `server/email.ts` — Brevo API / Gmail SMTP delivery
+- `server/storage.ts` — users + archived history
+- `server/db.ts` — Turso KV persistence
 
-Phaser renders a transparent UI over the Three.js canvas; they communicate through the shared `store`, and payments round-trip through the Bun backend.
+The frontend is plain DOM (no framework). The backend is a dependency-light `node:http` server that runs on Bun locally or Node via `tsx`; payments and emails round-trip through it.
 
 ## Deploying on Render (separate frontend + backend)
 
@@ -65,15 +76,16 @@ A `render.yaml` blueprint is included — create a new Render **Blueprint**, sel
 - Set in the Render dashboard under *Environment*:
   - `MP_TOKEN` → your Mercado Pago access token
   - `ADMIN_PASSWORD` → admin password
-  - `PUBLIC_HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links and the "my raffles" links in emails). If unset, `CORS_ORIGIN` is used as a fallback; if neither is set the server warns at startup and emails link to `http://localhost:3000`.
+  - `HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links and the "my raffles" links in emails). If unset, `CORS_ORIGIN` is used as a fallback; if neither is set the server warns at startup and emails link to `http://localhost:3000`.
   - `CORS_ORIGIN` → the **frontend** origin, e.g. `https://rifa-web.onrender.com` (must be an exact origin, not `*`, when deploying apart)
   - `MP_URL` → `https://rifa-api.onrender.com/api/webhooks` (reachable HTTPS endpoint)
   - `EMAIL` / `EMAIL_FROM` — sender address (verify it in Brevo)
   - `BREVO_API_KEY` — required on Render **free** tier (SMTP ports 25/465/587 are blocked there). SMTP (`EMAIL_P`) only works locally / on paid instances.
+  - `ORDER_TTL_MINUTES` — optional; how long a pending PIX order stays before its number holds are released and the order is dropped (default `30`). A payment approved after that is auto-refunded since it can no longer be fulfilled.
 - `PORT` defaults to `3001`; Render injects its own `PORT` if you keep it synced.
 - Local Node run (no Bun): `npm run server:node`
 
-> State (`server/data/raffle.json`, `users.json`, `history.json`) lives on the container's ephemeral disk and resets on redeploys across instances. For durable storage on a paid plan, attach a persistent **Disk** to `rifa-api` mounted at `/app/server/data`.
+> All state (current raffle, sales, users, history, pending PIX orders) lives in **Turso**, a remote libSQL database — the server refuses to start without `TURSO_DATABASE_URL` (alias `TURSO_URL`), so there is no local file storage and redeploys keep their data.
 
 ### 2. Frontend (`rifa-web`)
 - Static site; build command uses `bun install && bun run build:web`.
