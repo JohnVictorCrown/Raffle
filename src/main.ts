@@ -18,16 +18,21 @@ audio.volume = 0.4;
 audio.preload = "auto";
 
 const play = () => audio.play().catch(() => {});
-const playOnGesture = () => {
-  window.removeEventListener("pointerdown", playOnGesture);
-  window.removeEventListener("keydown", playOnGesture);
-  play();
-};
 
 audio.play().catch(() => {
-  // Autoplay with sound is blocked until the user interacts.
-  window.addEventListener("pointerdown", playOnGesture, { once: true });
-  window.addEventListener("keydown", playOnGesture, { once: true });
+  // Autoplay with sound is blocked until the user interacts (this happens on
+  // production/https, while localhost is allowed). Start muted so autoplay is
+  // permitted, then unmute + play on the first interaction.
+  audio.muted = true;
+  audio.play().catch(() => {});
+  const unlock = () => {
+    window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("keydown", unlock);
+    audio.muted = false;
+    play();
+  };
+  window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("keydown", unlock, { once: true });
 });
 
 const uiSlot = document.getElementById("ui")!;
