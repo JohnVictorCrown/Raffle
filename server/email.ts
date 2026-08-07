@@ -12,9 +12,10 @@
  *    EMAIL_FROM=Stellar Foundation Raffle <stellar.505org@gmail.com>
  */
 import tls from "node:tls";
+import net from "node:net";
 
 const host = process.env.EMAIL_HOST ?? "smtp.gmail.com";
-const port = Number(process.env.EMAIL_PORT ?? 465);
+const port = Number(process.env.EMAIL_PORT ?? 0);
 const user = process.env.EMAIL ?? "";
 const pass = process.env.EMAIL_P ?? "";
 const from = process.env.EMAIL_FROM ?? `Golden Lion Raffle <${user}>`;
@@ -28,23 +29,47 @@ function extractEmail(addr: string): string {
   return m ? m[1] : addr;
 }
 
-/** Send one plain-text email over SMTPS. Resolves true on success. */
-export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
-  if (!configured) {
-    console.log(`[email] (dev) -> ${to} subject="${subject}"`);
-    console.log(text.replace(/^/gm, "    "));
-    return true;
-  }
+interface Candidate {
+  mode: "smtps" | "starttls";
+  p: number;
+}
 
+/** Connection candidates: configured port first, then the alternate transport. */
+function candidates(): Candidate[] {
+  const list: Candidate[] = [];
+  const add = (mode: Candidate["mode"], p: number) => {
+    if (!list.some((c) => c.p === p)) list.push({ mode, p });
+  };
+  if (port) add(port === 465 ? "smtps" : "starttls", port);
+  add("smtps", 465);
+  add("starttls", 587);
+  return list;
+}
+
+/**
+ * One SMTP dialog over a connection that is either already TLS (465, "smtps")
+ * or plain text that must be upgraded via STARTTLS (587). Resolves true only
+ * after the server accepts the message (250) — anything else is logged and
+ * resolves false so the caller can try the next candidate.
+ */
+function runSession(cand: Candidate, to: string, subject: string, text: string): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
-    const socket = tls.connect({ host, port, rejectUnauthorized: false }, () => run());
-
+    let socket: net.Socket | tls.TLSSocket;
     let buffer = "";
     let pending: { resolve: (line: string) => void } | null = null;
+    let settled = false;
 
-    // Read SMTP reply. Replies are framed by CRLF (one line; multiline 250-x
-    // responses are fine since we only look at the leading code).
-    socket.on("data", (d: Buffer) => {
+    const fail = (why: string) => {
+      if (settled) return;
+      settled = true;
+      console.error(`[email] SMTP ${cand.mode}/${cand.p} failed for ${to}: ${why}`);
+      try {
+        socket.destroy();
+      } catch {}
+      resolve(false);
+    };
+
+    const onData = (d: Buffer) => {
       buffer += d.toString("utf-8");
       let idx = buffer.indexOf("\r\n");
       while (idx !== -1) {
@@ -55,48 +80,32 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
         if (cb) cb.resolve(line);
         idx = buffer.indexOf("\r\n");
       }
-    });
+    };
+    const onError = (err: any) => fail(`[${err?.code ?? "ERR"}] ${err?.message ?? err}`);
+    const onClose = () => {
+      if (!settled) fail("connection closed early");
+    };
 
-    socket.on("error", (err: any) => {
-      console.error(
-        `[email] SMTP error to ${to}:`,
-        JSON.stringify({
-          code: err?.code,
-          errno: err?.errno,
-          syscall: err?.syscall,
-          address: err?.address,
-          port: err?.port,
-          message: err?.message ?? String(err),
-        })
-      );
-      if (pending) pending.resolve("");
-      resolve(false);
-    });
+    // Whole-session deadline so a filtered port doesn't stall the deploy.
+    const deadline = setTimeout(() => fail(`timed out after 25s (${cand.mode}:${cand.p})`), 25_000);
 
-    socket.on("close", () => resolve(false));
-
-    async function run() {
-let cmdNow = "";
+    const session = async () => {
       try {
-        const onReply = (line: string) => {
-          const code = Number(line.slice(0, 3)) || 0;
-          return { code, line };
-        };
-        // read the next reply line WITHOUT sending anything
         const read = () =>
           new Promise<{ code: number; line: string }>((res) => {
-            pending = { resolve: (line) => res(onReply(line)) };
+            pending = {
+              resolve: (line) => res({ code: Number(line.slice(0, 3)) || 0, line }),
+            };
           });
         const step = (cmd: string) =>
           new Promise<{ code: number; line: string }>((res) => {
-            cmdNow = cmd.split(" ")[0] || cmd;
+            const label = cmd.split(" ")[0] || cmd;
             pending = {
               resolve: (line) => {
                 const code = Number(line.slice(0, 3)) || 0;
-                if (process.env.DEBUG_SMTP) console.log(`[email] < ${cmdNow} -> ${code} ${line}`);
+                if (process.env.DEBUG_SMTP) console.log(`[email] < ${label} -> ${code} ${line}`);
                 if (code >= 400) {
-                  console.error(`[email] SMTP rejected ${cmdNow}/${to}: ${line}`);
-                  socket.destroy();
+                  fail(`rejected ${label}: ${line}`);
                   res({ code, line });
                   return;
                 }
@@ -107,30 +116,69 @@ let cmdNow = "";
           });
 
         // Gmail greets us immediately on connect: a lone "220 ... ESMTP" line.
-        // Consume it first so every command below maps to its own reply.
         await read();
-        await step(`EHLO ${host}`);
+        if (cand.mode === "starttls") {
+          await step(`EHLO ${host}`);
+          await step("STARTTLS");
+          const secure = await new Promise<tls.TLSSocket>((resUp, rejUp) => {
+            const tlsSock = tls.connect({ socket: socket as net.Socket, servername: host, rejectUnauthorized: false }, () => {
+              socket.removeAllListeners("data");
+              socket.removeAllListeners("error");
+              socket.removeAllListeners("close");
+              socket = tlsSock;
+              tlsSock.on("data", onData);
+              tlsSock.on("error", onError);
+              tlsSock.on("close", onClose);
+              resUp(tlsSock);
+            });
+            tlsSock.on("error", rejUp);
+          });
+          socket = secure;
+          await step(`EHLO ${host}`);
+        } else {
+          await step(`EHLO ${host}`);
+        }
         await step("AUTH LOGIN");
         await step(b64(user));
         await step(b64(pass));
         await step(`MAIL FROM:<${extractEmail(from)}>`);
         await step(`RCPT TO:<${to}>`);
         await step("DATA");
-        // send final message + terminating "."; server replies 250 Message accepted
         await step(`Subject: ${subject}\r\nFrom: ${from}\r\nTo: ${to}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${text}\r\n.`);
         await step("QUIT");
+        clearTimeout(deadline);
+        settled = true;
         socket.end();
-        console.log(`[email] sent -> ${to} subject="${subject}"`);
+        console.log(`[email] sent -> ${to} subject="${subject}" (${cand.mode}:${cand.p})`);
         resolve(true);
       } catch {
-        // Already reported/logged by step()'s rejection path or the error handler.
-        try {
-          socket.destroy();
-        } catch {}
-        resolve(false);
+        // all failures are reported through fail()
       }
+    };
+
+    if (cand.mode === "smtps") {
+      socket = tls.connect({ host, port: cand.p, rejectUnauthorized: false }, () => void session().catch(() => {}));
+    } else {
+      socket = net.connect({ host, port: cand.p }, () => void session().catch(() => {}));
     }
+    socket.on("data", onData);
+    socket.on("error", onError);
+    socket.on("close", onClose);
   });
+}
+
+/** Send one plain-text email over SMTP (SMTPS 465 then STARTTLS 587). */
+export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+  if (!configured) {
+    console.log(`[email] (dev) -> ${to} subject="${subject}"`);
+    console.log(text.replace(/^/gm, "    "));
+    return true;
+  }
+  for (const cand of candidates()) {
+    const ok = await runSession(cand, to, subject, text);
+    if (ok) return true;
+  }
+  return false;
 }
 
 const slug = (s: string) =>
