@@ -1,15 +1,26 @@
 /**
  * Email delivery.
  *
- * When `EMAIL` / `EMAIL_P` (a Gmail app password) are configured it
- * sends real email over SMTP (SMTPS on 465). Otherwise it falls back to
- * logging so the feature can be developed locally.
+ * Delivery is attempted in this order:
  *
- *    EMAIL_HOST=smtp.gmail.com
- *    EMAIL_PORT=465
- *    EMAIL=stellar.505org@gmail.com
- *    EMAIL_P=<gmail-app-password>
- *    EMAIL_FROM=Stellar Foundation Raffle <stellar.505org@gmail.com>
+ *  1. Brevo (Sendinblue) HTTP API — used when `BREVO_API_KEY` is set. This is
+ *     the ONLY path that works on Render's free tier, which blocks outbound
+ *     SMTP ports (25/465/587). Send from a sender address you verify in Brevo.
+ *
+ *     BREVO_API_KEY=xxxxxxxx
+ *     EMAIL=stellar.0org@gmail.com              (sender address, must be verified)
+ *     EMAIL_FROM=Rifa Leão Dourado <stellar.0org@gmail.com>
+ *
+ *  2. Gmail SMTP — when `EMAIL` / `EMAIL_P` (a Gmail app password) are set.
+ *     Works locally and on paid Render instances; times out on free tier.
+ *
+ *     EMAIL_HOST=smtp.gmail.com
+ *     EMAIL_PORT=465
+ *     EMAIL=stellar.505org@gmail.com
+ *     EMAIL_P=<gmail-app-password>
+ *     EMAIL_FROM=Stellar Foundation Raffle <stellar.505org@gmail.com>
+ *
+ *  3. Log-only fallback (dev) when neither is configured.
  */
 import tls from "node:tls";
 import net from "node:net";
@@ -19,14 +30,50 @@ const port = Number(process.env.EMAIL_PORT ?? 0);
 const user = process.env.EMAIL ?? "";
 const pass = process.env.EMAIL_P ?? "";
 const from = process.env.EMAIL_FROM ?? `Golden Lion Raffle <${user}>`;
+const brevoKey = process.env.BREVO_API_KEY ?? "";
 
-const configured = Boolean(user && pass);
+const configured = Boolean(brevoKey || (user && pass));
 
 const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
 
 function extractEmail(addr: string): string {
   const m = /<([^>]+)>/.exec(addr);
   return m ? m[1] : addr;
+}
+
+/** Split "Name <email>" into its parts. */
+function parseFrom(addr: string): { name: string; email: string } {
+  const m = /^(.*?)\s*<([^>]+)>$/.exec(addr.trim());
+  if (m) return { name: m[1].trim(), email: m[2].trim() };
+  return { name: "Golden Lion Raffle", email: addr.trim() || user };
+}
+
+/** Send via Brevo HTTP API (port 443 — not blocked on Render free tier). */
+async function sendBrevo(to: string, subject: string, text: string): Promise<boolean> {
+  const { name, email } = parseFrom(from);
+  const payload = {
+    sender: { name, email },
+    to: [{ email: to }],
+    subject,
+    textContent: text,
+  };
+  try {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": brevoKey },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      console.log(`[email] sent (brevo) -> ${to} subject="${subject}"`);
+      return true;
+    }
+    const body = await res.text().catch(() => "");
+    console.error(`[email] brevo rejected (HTTP ${res.status}): ${body.slice(0, 300)}`);
+    return false;
+  } catch (err: any) {
+    console.error(`[email] brevo error: ${err?.message ?? err}`);
+    return false;
+  }
 }
 
 interface Candidate {
@@ -167,8 +214,9 @@ function runSession(cand: Candidate, to: string, subject: string, text: string):
   });
 }
 
-/** Send one plain-text email over SMTP (SMTPS 465 then STARTTLS 587). */
+/** Send one plain-text email (Brevo API when a key is set, else Gmail SMTP). */
 export async function sendEmail(to: string, subject: string, text: string): Promise<boolean> {
+  if (brevoKey) return sendBrevo(to, subject, text);
   if (!configured) {
     console.log(`[email] (dev) -> ${to} subject="${subject}"`);
     console.log(text.replace(/^/gm, "    "));

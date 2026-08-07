@@ -565,6 +565,7 @@ async function bootstrap() {
         " TURSO_TOKEN=" + has("TURSO_TOKEN") +
         " EMAIL=" + has("EMAIL") +
         " EMAIL_P=" + has("EMAIL_P") +
+        " BREVO_API_KEY=" + has("BREVO_API_KEY") +
         " PUBLIC_HOST=" + (process.env.PUBLIC_HOST || "(default)") +
         " PORT=" + (process.env.PORT ?? "(default)")
     );

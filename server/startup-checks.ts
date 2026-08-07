@@ -23,22 +23,24 @@ async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<
   return Promise.race([p, t]).finally(() => timer && clearTimeout(timer));
 }
 
-/** Verify Gmail SMTP works by sending a tiny test email to the sender address. */
+/** Verify email delivery works (Brevo API or Gmail SMTP) via a test email. */
 async function checkEmail(): Promise<void> {
-  const from = (process.env.EMAIL_FROM || `Golden Lion Raffle <${process.env.EMAIL || ""}>`).trim();
   const to = process.env.EMAIL;
-  if (!to || !process.env.EMAIL_P) {
-    fail(`EMAIL / EMAIL_P are not configured (SMTP email will not send).`);
+  if (!to) {
+    fail(`EMAIL is not configured (email will not send).`);
+  }
+  if (!process.env.BREVO_API_KEY && !process.env.EMAIL_P) {
+    fail(`no email transport configured: set BREVO_API_KEY (or EMAIL / EMAIL_P for SMTP).`);
   }
   const ok = await withTimeout(
     sendEmail(to, "Rifa — startup email check", "This is an automated startup check. Emails are working ✓"),
     15_000,
-    "smtp"
+    "email"
   );
   if (!ok) {
-    fail(`could not send the SMTP test email to ${to}.`);
+    fail(`could not send the test email to ${to}.`);
   }
-  console.log(`[startup-check] email OK (SMTP test sent to ${to})`);
+  console.log(`[startup-check] email OK (test sent to ${to})`);
 }
 
 /** Validate MP_TOKEN by asking Mercado Pago who "me" is. */

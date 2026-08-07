@@ -68,7 +68,8 @@ A `render.yaml` blueprint is included — create a new Render **Blueprint**, sel
   - `PUBLIC_HOST` → the **frontend** domain, e.g. `rifa-web.onrender.com` (used to build winner claim links)
   - `CORS_ORIGIN` → the **frontend** origin, e.g. `https://rifa-web.onrender.com` (must be an exact origin, not `*`, when deploying apart)
   - `MP_URL` → `https://rifa-api.onrender.com/api/webhooks` (reachable HTTPS endpoint)
-  - `EMAIL` / `EMAIL_P` / `EMAIL_FROM` (Gmail app password) as needed
+  - `EMAIL` / `EMAIL_FROM` — sender address (verify it in Brevo)
+  - `BREVO_API_KEY` — required on Render **free** tier (SMTP ports 25/465/587 are blocked there). SMTP (`EMAIL_P`) only works locally / on paid instances.
 - `PORT` defaults to `3001`; Render injects its own `PORT` if you keep it synced.
 - Local Node run (no Bun): `npm run server:node`
 

@@ -33,6 +33,8 @@ envVarGroups:
         sync: false
       - key: EMAIL_P
         sync: false
+      - key: BREVO_API_KEY
+        sync: false
       - key: EMAIL_FROM
         sync: false
       - key: TURSO_DATABASE_URL
