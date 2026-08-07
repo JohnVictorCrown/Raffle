@@ -1,0 +1,22 @@
+{
+  "name": "rifa",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "bun run server/index.ts",
+    "typecheck:server": "tsc -p tsconfig.server.json",
+    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "mercadopago": "^3.3.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/three": "^0.185.4"
+  }
+}

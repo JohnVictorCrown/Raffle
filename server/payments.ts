@@ -1,0 +1,169 @@
+import { MercadoPagoConfig, Order } from "mercadopago";
+import type { Options } from "mercadopago/dist/types";
+import type { CreateOrderRequest } from "mercadopago/dist/clients/order/create/types";
+import type { OrderResponse } from "mercadopago/dist/clients/order/commonTypes";
+
+export interface PendingOrder {
+  orderId: string;
+  paymentId: string;
+  status: string;
+  createdAt: number;
+  numbers: number[];
+  buyer: string;
+}
+
+const orders = new Map<string, PendingOrder>();
+
+function getClient(): MercadoPagoConfig {
+  const accessToken = process.env.MP_ACCESS_TOKEN;
+  if (!accessToken) {
+    throw new Error(
+      "Mercado Pago is not configured. Set MP_ACCESS_TOKEN (a TEST-… or APP_USR-… token) in your .env file, then restart the server."
+    );
+  }
+  return new MercadoPagoConfig({ accessToken });
+}
+
+export interface CreatePixOrderOpts {
+  transaction_amount: number;
+  description: string;
+  payerEmail: string;
+  payerName: string;
+  externalReference: string;
+  numbers: number[];
+  buyer: string;
+}
+
+function firstPayment(of: OrderResponse) {
+  return of?.transactions?.payments?.[0];
+}
+
+/**
+ * Creates a PIX payment via the Mercado Pago Orders API (Transparent Checkout).
+ * The resulting order carries a single PIX transaction with QR data.
+ */
+export async function createPixOrder(opts: CreatePixOrderOpts): Promise<{
+  order: OrderResponse;
+  paymentId: string;
+  qrCode: string;
+  qrCodeBase64: string;
+  pending: PendingOrder;
+}> {
+  const order = new Order(getClient());
+
+  const body: CreateOrderRequest = {
+    type: "online",
+    external_reference: opts.externalReference,
+    description: opts.description,
+    currency: "BRL",
+    total_amount: opts.transaction_amount.toFixed(2),
+    capture_mode: "automatic",
+    payer: {
+      email: opts.payerEmail,
+      first_name: opts.payerName,
+    },
+    transactions: {
+      payments: [
+        {
+          amount: opts.transaction_amount.toFixed(2),
+          payment_method: {
+            type: "bank_transfer",
+            id: "pix",
+          },
+        },
+      ],
+    },
+  };
+
+  const requestOptions: Options = {
+    idempotencyKey: `${opts.externalReference}-${Date.now()}`,
+  };
+
+  const res = await order.create({ body, requestOptions });
+
+  const payment = firstPayment(res);
+  const paymentMethod = payment?.payment_method as { qr_code?: string; qr_code_base64?: string } | undefined;
+  const paymentId = String(payment?.id ?? res.id ?? "");
+
+  const pending: PendingOrder = {
+    orderId: String(res.id ?? ""),
+    paymentId,
+    status: String(payment?.status ?? res.status ?? "pending"),
+    createdAt: Date.now(),
+    numbers: opts.numbers,
+    buyer: opts.buyer,
+  };
+  orders.set(pending.orderId, pending);
+  if (paymentId) orders.set(paymentId, pending);
+
+  return {
+    order: res,
+    paymentId,
+    qrCode: paymentMethod?.qr_code ?? "",
+    qrCodeBase64: paymentMethod?.qr_code_base64 ?? "",
+    pending,
+  };
+}
+
+/** Fetch the current status of a payment by its payment id or order id. */
+export async function getPaymentStatusById(paymentId: string): Promise<string> {
+  const order = new Order(getClient());
+  // Accept both the payment id and the parent order id as lookup keys.
+  const pending =
+    orders.get(paymentId) ??
+    Array.from(orders.values()).find((o) => o.orderId === paymentId);
+  if (pending) {
+    const res = await order.get({ id: pending.orderId });
+    return String(firstPayment(res)?.status ?? "pending");
+  }
+  return "pending";
+}
+
+export function getPendingOrder(id: string): PendingOrder | undefined {
+  return orders.get(id);
+}
+
+/**
+ * Payout a winner by PIX. Requires the MP account to have PIX outgoing (PIX
+ * automático / AUM) enabled; otherwise Mercado Pago returns an error which we
+ * surface to the caller. Best-effort: resolves with the MP payment id on
+ * success, or an error message.
+ */
+export async function processPixPayout(opts: {
+  transactionAmount: number;
+  pixKey: string;
+  pixKeyType: "email" | "cpf" | "phone" | "random";
+  description: string;
+}): Promise<{ ok: boolean; id?: string; status?: string; error?: string }> {
+  const token = process.env.MP_ACCESS_TOKEN;
+  if (!token) return { ok: false, error: "MP_ACCESS_TOKEN is not configured." };
+
+  try {
+    const res = await fetch("https://api.mercadopago.com/v1/payments", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Idempotency-Key": `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      },
+      body: JSON.stringify({
+        transaction_amount: opts.transactionAmount,
+        description: opts.description,
+        payment_method_id: "pix",
+        payer: {
+          email: opts.pixKey,
+        },
+        ...(opts.pixKeyType === "cpf" && {
+          payer: { email: opts.pixKey, identification: { type: "CPF", number: opts.pixKey } },
+        }),
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      return { ok: false, error: data?.message ?? data?.error ?? `Mercado Pago error (${res.status})` };
+    }
+    return { ok: true, id: data?.id, status: data?.status };
+  } catch (err: any) {
+    return { ok: false, error: err?.message ?? "Unable to reach Mercado Pago" };
+  }
+}
