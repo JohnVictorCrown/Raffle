@@ -19,24 +19,32 @@ function readEnvFile(file: string): Record<string, string> {
   }
 }
 
-const forced: Record<string, string> = {};
-const prodEnv = readEnvFile(".env.production");
-if (prodEnv.VITE_API_URL) {
-  forced["import.meta.env.VITE_API_URL"] = JSON.stringify(prodEnv.VITE_API_URL);
-}
+// Only force the production backend origin when actually building for
+// production. In dev (`vite`) the empty VITE_API_URL from .env must win so the
+// frontend uses the local server via the /api proxy (port 3001) instead of
+// silently talking to the deployed backend.
+export default defineConfig(({ mode }) => {
+  const forced: Record<string, string> = {};
+  if (mode === "production") {
+    const prodEnv = readEnvFile(".env.production");
+    if (prodEnv.VITE_API_URL) {
+      forced["import.meta.env.VITE_API_URL"] = JSON.stringify(prodEnv.VITE_API_URL);
+    }
+  }
 
-export default defineConfig({
-  define: forced,
-  server: {
-    port: 3000,
-    proxy: {
-      "/api": {
-        target: "http://localhost:3001",
-        changeOrigin: true,
+  return {
+    define: forced,
+    server: {
+      port: 3000,
+      proxy: {
+        "/api": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
       },
     },
-  },
-  build: {
-    target: "es2022",
-  },
+    build: {
+      target: "es2022",
+    },
+  };
 });
