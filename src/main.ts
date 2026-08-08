@@ -43,6 +43,9 @@ audio.play().catch(() => {
   audio.muted = true;
   audio.play().catch(() => {});
   const unlock = () => {
+    for (const ev of ["pointerdown", "touchstart", "mousedown", "keydown"] as const) {
+      window.removeEventListener(ev, unlock);
+    }
     audio.muted = false;
     play();
   };
