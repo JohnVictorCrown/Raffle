@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { createPixPayment, getPaymentStatus, getRaffle, type PublicRaffle } from "../api";
 import lionImg from "../assets/lion.png";
 import { buildFooter } from "./footer";
+import { prizeAmountOf } from "../../server/money";
 
 const POLL_MS = 3000;
 
@@ -243,7 +244,7 @@ export class RifaOverlay {
     };
     mk(L.availableName, `${available} ${L.freeNumbers}`, "text");
     mk(L.soldName, `${sold}/${raffle.ticketCount}`, "blue");
-    const totalPrize = Math.round(raffle.ticketCount * raffle.price * 0.7 * 100) / 100;
+    const totalPrize = prizeAmountOf(raffle.price, raffle.ticketCount);
     mk(L.prizeAmountName, L.money(totalPrize, raffle.currency), "gold");
     mk(L.raisedName, L.money(raised, raffle.currency), "text");
     if (raffle.drawDate) {
@@ -338,8 +339,14 @@ export class RifaOverlay {
       const cw = cells.clientWidth;
       const ch = cells.clientHeight;
       if (!cw || !ch) return;
-      const cols = Math.max(1, Math.min(raffle.ticketCount, Math.round(Math.sqrt((raffle.ticketCount * cw) / ch))));
-      cells.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      // On narrow screens cap the column count so cells stay readable
+      // (mirrors the CSS minmax(44px, 1fr) fallback); desktop keeps the
+      // original near-square sizing untouched.
+      const maxCols = cw < 480 ? Math.floor(cw / 44) : raffle.ticketCount;
+      const cols = Math.max(1, Math.min(raffle.ticketCount, Math.round(Math.sqrt((raffle.ticketCount * cw) / ch)), maxCols));
+      // minmax(0, 1fr): plain `1fr` tracks refuse to shrink below the cell's
+      // content width, overflowing narrow mobile containers.
+      cells.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     });
 
     // buy bar — name, email + selected count

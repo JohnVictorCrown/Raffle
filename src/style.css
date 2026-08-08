@@ -771,8 +771,9 @@ select.input {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    /* Room so the pinned footer never covers the last content row. */
-    padding-bottom: 64px;
+    /* Explicitly clear the old pinned-footer padding so the footer sits at
+       the very end of the scrollable content with no trailing blank space. */
+    padding-bottom: 0;
   }
 
   /* Top bar participates in the column flow; no more fixed 96px offset. */
@@ -785,12 +786,19 @@ select.input {
     flex: none;
   }
 
-  /* Admin / my raffles / withdraw pages: content starts right under the bar. */
+  /* Admin / my raffles / withdraw pages: content scrolls under the bar, with
+     the footer flowing at the very bottom instead of floating over it. */
   .admin-body {
-    top: 84px;
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
-  /* Raffle card + countdown flow naturally below the bar. */
+  /* Raffle card + countdown flow naturally below the bar, more compact. */
   .info-col {
     position: relative;
     top: auto;
@@ -801,7 +809,21 @@ select.input {
   }
 
   .info-col .info {
-    padding: 14px;
+    padding: 12px;
+    gap: 6px;
+  }
+
+  .info-col .info-title {
+    font-size: 16px;
+  }
+
+  .info-col .info-prize {
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+
+  .info-col .info-row {
+    font-size: 12px;
   }
 
   /* Number grid takes the remaining space below the card; cells scroll. */
@@ -813,7 +835,7 @@ select.input {
     bottom: auto;
     margin: 12px;
     padding: 14px;
-    min-height: 360px;
+    min-height: 340px;
     flex: 1 1 auto;
     display: flex;
   }
@@ -823,8 +845,31 @@ select.input {
     height: auto;
   }
 
+  /* Let the grid and its children shrink to the true column width: the
+     auto-fill tracks' minimum width must never force a right-side overflow. */
+  .grid-area > .grid,
+  .grid-head,
+  .cells,
+  .buybar {
+    min-width: 0;
+  }
+
+  .cells {
+    grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  }
+
   .raffle-img {
     display: none;
+  }
+
+  /* Footer scrolls with the content and sits after the grid, not pinned. */
+  .footer {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    order: 99;
+    padding: 8px 12px 14px;
   }
 
   /* Buy controls: stack vertically, full-width, touch-friendly. */
@@ -882,6 +927,19 @@ select.input {
   .buy-name,
   .btn {
     font-size: 16px;
+  }
+
+  /* Compact the countdown strip to match the slimmer card. */
+  .draw-countdown {
+    padding: 8px 10px;
+  }
+
+  .cd-name {
+    font-size: 11px;
+  }
+
+  .cd-val {
+    font-size: 14px;
   }
 }
 
@@ -945,8 +1003,4 @@ select.input {
   }
 }
 
-@media (max-width: 480px) {
-  .admin-body {
-    top: 76px;
-  }
-}
+
