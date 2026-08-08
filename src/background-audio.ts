@@ -108,12 +108,28 @@ async function playTrack(): Promise<void> {
   };
 }
 
-const GESTURES = ["click", "keydown", "touchstart", "pointerdown", "mousedown"] as const;
+// Everything that can count as a first user interaction. Drags are covered by
+// the touch/move/up + wheel chain; scroll covers momentum scrolling that fires
+// after the finger lifts. All are passive so they never block scrolling.
+const GESTURES = [
+  "click",
+  "keydown",
+  "touchstart",
+  "touchmove",
+  "touchend",
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "mousedown",
+  "wheel",
+] as const;
 
 function unlock(): void {
   for (const ev of GESTURES) {
     window.removeEventListener(ev, unlock);
   }
+  // Scroll doesn't bubble, so it's captured on the document instead.
+  document.removeEventListener("scroll", unlock, { capture: true });
   // Desktop autoplay already has music going: nothing to do but clean up.
   if (startedRef) return;
   const c = getCtx();
@@ -131,6 +147,7 @@ export function startBackgroundAudio(): void {
     playTrack();
   }
   for (const ev of GESTURES) {
-    window.addEventListener(ev, unlock);
+    window.addEventListener(ev, unlock, { passive: true });
   }
+  document.addEventListener("scroll", unlock, { capture: true, passive: true });
 }
