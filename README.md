@@ -8,7 +8,7 @@ A lion-themed raffle web app (Rifa) — a vanilla TypeScript SPA on **Vite** tha
 - Create a raffle (title, prize, number of tickets, price, currency)
 - Buy numbers via the **Mercado Pago PIX payment gateway** (QR code displayed, status polled, numbers held/reserved on approval)
 - Auto-draw a winner with a random delay once the raffle sells out (winner + participants notified by email)
-- Winners withdraw their prize via PIX from a claim link emailed to them
+- Winners withdraw their prize via PIX from a claim link emailed to them — the prize is **70% of the total money raised** (the organizer keeps 30%), computed in `server/money.ts` and unit-tested
 - "My raffles" page to track participations and results (by code or email)
 - Language toggle (English / Português)
 - Bright yellow-and-gold "tigrinho"-style theme over dark sub-tone panels
@@ -54,6 +54,7 @@ bun run preview   # preview production build
 - `server/startup-checks.ts` — fail-fast boot checks (email + Mercado Pago)
 - `server/raffle.ts` — single-raffle lifecycle (holds, sales, auto-draw, archive)
 - `server/payments.ts` — Mercado Pago wrapper (PIX create, status, refunds)
+- `server/money.ts` — payout math (winner gets 70% of raised, rounded to 2 decimals)
 - `server/email.ts` — Brevo API / Gmail SMTP delivery
 - `server/storage.ts` — users + archived history
 - `server/db.ts` — Turso KV persistence

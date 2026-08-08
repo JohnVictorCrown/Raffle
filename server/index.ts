@@ -21,6 +21,8 @@ import {
   type Raffle,
 } from "./raffle";
 import { sendWinnerEmail, prizeClaimPath, sendParticipationEmail, sendResultEmail, myRafflesPath } from "./email";
+import { createNotifDispatcher, retryEmail, NOTIF_MAX_ATTEMPTS, type PendingNotif, type NotifEmailState } from "./notify";
+import { payoutOf, prizeAmountOf, payoutAllowed } from "./money";
 import { runStartupChecks } from "./startup-checks";
 import {
   recordParticipation,
@@ -175,7 +177,7 @@ function publicRaffle(lang: string) {
     available: availableCount(r),
     soldNumbers: r.sold.map((s) => s.number),
     soldCount: r.sold.length,
-    prizeAmount: Math.round(r.ticketCount * r.price * 0.7 * 100) / 100,
+    prizeAmount: prizeAmountOf(r.price, r.ticketCount),
     winner: r.winner
       ? { number: r.winner.number, email: r.winner.email, at: r.winner.at }
       : null,
@@ -190,41 +192,9 @@ const notifiedRaffles = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // Durable draw notifications: winner + result emails with backoff retries.
-// Progress is persisted per email (`sent` flags) under `notif:` keys so a
-// crash/restart resumes exactly where it left off instead of going silent or
-// double-sending. After NOTIF_MAX_ATTEMPTS a batch is abandoned and logged
-// loudly for manual action.
+// The retry/backoff + dedupe engine lives in ./notify (unit-tested); this file
+// only wires its real dependencies: email senders, Turso kv, and setTimeout.
 // ---------------------------------------------------------------------------
-
-interface NotifEmailState {
-  email: string;
-  name: string;
-  kind: "winner" | "result";
-  won: boolean;
-  url: string;
-  sent: boolean;
-}
-
-interface PendingNotif {
-  token: string; // winner claim token — also the dedupe key
-  raffleTitle: string;
-  winnerName: string;
-  winnerNumber: number;
-  payout: number;
-  withdrawUrl: string;
-  emails: NotifEmailState[];
-  createdAt: number;
-  attempts: number;
-}
-
-const NOTIF_MAX_ATTEMPTS = 6;
-const NOTIF_BASE_DELAY_MS = 30_000; // backoff: 30s, 2m, 8m, 32m, ~2h
-
-function notifDelay(attempt: number): number {
-  return NOTIF_BASE_DELAY_MS * Math.pow(4, attempt - 1);
-}
-
-const dispatchingNotifs = new Set<string>();
 
 async function saveNotif(n: PendingNotif) {
   try {
@@ -269,113 +239,35 @@ async function sendNotifEmail(n: PendingNotif, e: NotifEmailState): Promise<bool
   }
 }
 
-/**
- * Deliver a draw's notification emails with exponential backoff. Only unsent
- * emails are re-attempted, so retries never duplicate already-delivered mail.
- */
-function dispatchNotif(n: PendingNotif) {
-  if (dispatchingNotifs.has(n.token)) return;
-  dispatchingNotifs.add(n.token);
-
-  const runBatch = async () => {
-    n.attempts += 1;
-    for (const e of n.emails) {
-      if (e.sent) continue;
-      const ok = await sendNotifEmail(n, e);
-      if (ok) {
-        e.sent = true;
-        console.log(`[notif] ${e.kind} email sent -> ${e.email}`);
-        // Persist immediately so a crash mid-batch can't re-send this email.
-        await saveNotif(n);
-      } else {
-        console.warn(
-          `[notif] ${e.kind} email to ${e.email} failed (attempt ${n.attempts}/${NOTIF_MAX_ATTEMPTS}) for raffle "${n.raffleTitle}"`
-        );
-      }
-    }
-    await saveNotif(n);
-
-    const pending = n.emails.filter((e) => !e.sent);
-    if (pending.length === 0) {
-      console.log(`[notif] all ${n.emails.length} notification email(s) delivered for raffle "${n.raffleTitle}"`);
-      dispatchingNotifs.delete(n.token);
-      void deleteNotif(n.token);
-      return;
-    }
-    if (n.attempts >= NOTIF_MAX_ATTEMPTS) {
-      console.error(
-        `[notif] GAVE UP after ${n.attempts} attempts for raffle "${n.raffleTitle}" — still pending: ` +
-          pending.map((e) => `${e.kind}<${e.email}>`).join(", ") +
-          ". MANUAL ACTION REQUIRED."
-      );
-      dispatchingNotifs.delete(n.token);
-      return;
-    }
-    const delay = notifDelay(n.attempts);
-    console.warn(`[notif] ${pending.length} email(s) pending for raffle "${n.raffleTitle}" — retrying in ${Math.round(delay / 1000)}s`);
-    setTimeout(() => void runBatch(), delay);
-  };
-
-  void runBatch();
-}
+const notifs = createNotifDispatcher({
+  sendEmail: sendNotifEmail,
+  save: saveNotif,
+  remove: deleteNotif,
+  schedule: (fn, ms) => setTimeout(fn, ms),
+});
 
 /** Resume persisted notification batches after a restart. */
 async function loadPendingNotifs() {
   try {
-    let loaded = 0;
+    const records: PendingNotif[] = [];
     for (const row of await kvAll("notif:")) {
-      const n = JSON.parse(row.data) as PendingNotif;
-      const pending = n.emails.filter((e) => !e.sent);
-      if (pending.length === 0) {
-        await deleteNotif(n.token); // stale fully-sent record
-      } else if (n.attempts < NOTIF_MAX_ATTEMPTS) {
-        loaded += 1;
-        dispatchNotif(n); // resume exactly where it left off
-      } else {
-        console.error(
-          `[notif] abandoned notification for raffle "${n.raffleTitle}" (${pending.length} email(s) unsent) needs manual attention`
-        );
-        // Prune abandoned records older than 30 days so they don't accumulate.
-        if (Date.now() - n.createdAt > 30 * 24 * 3_600_000) {
-          await deleteNotif(n.token);
-        }
-      }
+      records.push(JSON.parse(row.data) as PendingNotif);
     }
-    console.log(`Loaded ${loaded} pending notification(s) from Turso`);
+    // Prune abandoned records older than 30 days so they don't accumulate.
+    const cutoff = Date.now() - 30 * 24 * 3_600_000;
+    const active = records.filter((n) => {
+      const pending = n.emails.filter((e) => !e.sent);
+      if (pending.length > 0 && n.attempts >= NOTIF_MAX_ATTEMPTS && n.createdAt < cutoff) {
+        void deleteNotif(n.token);
+        return false;
+      }
+      return true;
+    });
+    const resumed = await notifs.loadPending(active);
+    console.log(`Loaded ${resumed} pending notification(s) from Turso`);
   } catch (err) {
     console.error("Failed to load pending notifications", err);
   }
-}
-
-/** Fire-and-forget email with backoff retries (transactional emails like the
- *  participation confirmation). No persistence, but loud on failure. */
-function retryEmail(job: () => Promise<boolean>, what: string) {
-  let attempts = 0;
-  const run = () => {
-    attempts += 1;
-    Promise.resolve()
-      .then(job)
-      .then((ok) => {
-        if (ok) return;
-        if (attempts >= NOTIF_MAX_ATTEMPTS) {
-          console.error(`[email] GAVE UP: ${what} after ${attempts} attempts — MANUAL ACTION REQUIRED`);
-          return;
-        }
-        const delay = notifDelay(attempts);
-        console.warn(`[email] ${what} failed (attempt ${attempts}/${NOTIF_MAX_ATTEMPTS}) — retrying in ${Math.round(delay / 1000)}s`);
-        setTimeout(run, delay);
-      })
-      .catch((err: any) => {
-        console.error(`[email] ${what} threw:`, err?.message ?? err);
-        if (attempts >= NOTIF_MAX_ATTEMPTS) {
-          console.error(`[email] GAVE UP: ${what} after ${attempts} attempts — MANUAL ACTION REQUIRED`);
-          return;
-        }
-        const delay = notifDelay(attempts);
-        setTimeout(run, delay);
-      });
-  };
-  run();
 }
 
 function notifyRaffleEnded(r: Raffle) {
@@ -383,7 +275,7 @@ function notifyRaffleEnded(r: Raffle) {
   notifiedRaffles.add(r.winner.token);
 
   const raised = r.sold.reduce((a, s) => a + s.amount, 0);
-  const payout = Math.round(raised * 0.7 * 100) / 100;
+  const payout = payoutOf(raised);
   const winnerNum = r.winner.number;
   const winnerUser = getUserByEmail(r.winner.email);
   const winnerName = winnerUser?.name || r.winner.name || r.winner.email;
@@ -430,7 +322,7 @@ function notifyRaffleEnded(r: Raffle) {
     createdAt: Date.now(),
     attempts: 0,
   };
-  void saveNotif(notif).then(() => dispatchNotif(notif));
+  void saveNotif(notif).then(() => notifs.dispatchNotif(notif));
 }
 
 // When a raffle is drawn it is immediately archived and replaced by a fresh
@@ -607,7 +499,7 @@ async function handle(req: Request): Promise<Response> {
         db: dbOk,
         raffleId: r?.id ?? null,
         pendingOrders: orders.size / 2,
-        inFlightNotifications: dispatchingNotifs.size,
+        inFlightNotifications: notifs.inFlightCount(),
       });
     }
 
@@ -677,7 +569,7 @@ async function handle(req: Request): Promise<Response> {
           number: r.winner.number,
           prize: r.prize,
           raffleTitle: r.title,
-          payout: Math.round(raised * 0.7 * 100) / 100,
+          payout: payoutOf(raised),
           paid: !!r.winner.paid,
         });
       }
@@ -688,7 +580,7 @@ async function handle(req: Request): Promise<Response> {
           number: past.winner.number,
           prize: past.prize,
           raffleTitle: past.title,
-          payout: Math.round((past.raised ?? past.soldCount * 0) * 0.7 * 100) / 100,
+          payout: payoutOf(past.raised ?? 0),
           paid: !!past.winner.paid,
         });
       }
@@ -720,8 +612,8 @@ async function handle(req: Request): Promise<Response> {
         drawn === r
           ? r.sold.reduce((a, s) => a + s.amount, 0)
           : ((drawn as PastRaffle).raised ?? 0);
-      const payout = Math.round(raised * 0.7 * 100) / 100;
-      if (payout <= 0) return json({ error: "no funds to pay out" }, 400);
+      const payout = payoutOf(raised);
+      if (!payoutAllowed(payout)) return json({ error: "no funds to pay out" }, 400);
 
       const result = await processPixPayout({
         transactionAmount: payout,

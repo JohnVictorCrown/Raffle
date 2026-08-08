@@ -11,7 +11,8 @@
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "build:web": "node scripts/build-info.mjs && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
