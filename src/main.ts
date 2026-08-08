@@ -33,25 +33,44 @@ for (const [src, type] of [
 audio.style.display = "none";
 document.body.appendChild(audio);
 
-const play = () => audio.play().catch(() => {});
+// Full gesture chain a tap can produce on mobile (touchstart -> touchend ->
+// pointer events -> mouse events -> click) plus keydown for keyboards; the
+// first one that fires wins and the rest are cleaned up.
+const GESTURES = [
+  "touchstart",
+  "touchend",
+  "pointerdown",
+  "pointerup",
+  "mousedown",
+  "click",
+  "keydown",
+] as const;
 
-audio.play().catch(() => {
-  // Autoplay with sound is blocked until the user interacts (this happens on
-  // production/https, while localhost is allowed). Start muted so autoplay is
-  // permitted, then unmute + play on the first interaction. Touchstart covers
-  // older iOS that does not fire pointerdown.
+// Unmute + play inside the user's first gesture. Listeners are attached
+// IMMEDIATELY (not inside a play().catch): on iOS a blocked autoplay promise
+// can stay pending forever instead of rejecting, which would otherwise mean
+// the unlock never gets wired up and taps do nothing.
+const unlock = () => {
+  for (const ev of GESTURES) {
+    window.removeEventListener(ev, unlock);
+  }
+  audio.muted = false;
+  audio.play().catch(() => {});
+};
+for (const ev of GESTURES) {
+  window.addEventListener(ev, unlock, { once: true, passive: true });
+}
+
+// Try autoplay with sound first (desktop / Android where it is permitted). If
+// the browser blocks it, fall back to muted autoplay (always allowed) and let
+// the first tap unmute + start playback above.
+audio.play().then(() => {
+  for (const ev of GESTURES) {
+    window.removeEventListener(ev, unlock);
+  }
+}).catch(() => {
   audio.muted = true;
   audio.play().catch(() => {});
-  const unlock = () => {
-    for (const ev of ["pointerdown", "touchstart", "mousedown", "keydown"] as const) {
-      window.removeEventListener(ev, unlock);
-    }
-    audio.muted = false;
-    play();
-  };
-  for (const ev of ["pointerdown", "touchstart", "mousedown", "keydown"] as const) {
-    window.addEventListener(ev, unlock, { once: true });
-  }
 });
 
 const uiSlot = document.getElementById("ui")!;
