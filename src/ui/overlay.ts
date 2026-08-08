@@ -242,7 +242,6 @@ export class RifaOverlay {
       info.appendChild(row);
     };
     mk(L.availableName, `${available} ${L.freeNumbers}`, "text");
-    mk(L.soldName, `${sold}/${raffle.ticketCount}`, "blue");
     // Prize at full sell-out = 70% of all tickets (mirrors server/money.ts).
     const totalPrize = Math.round(raffle.ticketCount * raffle.price * 0.7 * 100) / 100;
     mk(L.prizeAmountName, L.money(totalPrize, raffle.currency), "gold");
