@@ -809,21 +809,23 @@ select.input {
   }
 
   .info-col .info {
-    padding: 12px;
-    gap: 6px;
+    padding: 8px 10px;
+    gap: 3px;
   }
 
   .info-col .info-title {
-    font-size: 16px;
+    font-size: 14px;
+    line-height: 1.25;
   }
 
   .info-col .info-prize {
-    font-size: 12px;
-    margin-bottom: 2px;
+    font-size: 11px;
+    margin-bottom: 0;
   }
 
   .info-col .info-row {
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1.3;
   }
 
   /* Number grid takes the remaining space below the card; cells scroll. */
@@ -872,29 +874,32 @@ select.input {
     padding: 8px 12px 14px;
   }
 
-  /* Buy controls: stack vertically, full-width, touch-friendly. */
+  /* Buy controls: stack vertically, full-width, touch-friendly and slim. */
   .buybar {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 6px;
   }
 
   .buy-count {
     min-width: 0;
     text-align: center;
+    font-size: 11px;
+    line-height: 1.2;
   }
 
   .buy-name {
     flex: none;
     width: 100%;
     max-width: none;
-    font-size: 16px;
+    font-size: 16px; /* keep ≥16px so iOS doesn't zoom on focus */
+    padding: 6px 10px;
   }
 
   .buybar .btn-primary {
     width: 100%;
-    padding: 14px 18px;
-    font-size: 16px;
+    padding: 8px 14px;
+    font-size: 15px;
   }
 
   .brand {
@@ -931,15 +936,15 @@ select.input {
 
   /* Compact the countdown strip to match the slimmer card. */
   .draw-countdown {
-    padding: 8px 10px;
+    padding: 5px 10px;
   }
 
   .cd-name {
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .cd-val {
-    font-size: 14px;
+    font-size: 13px;
   }
 }
 
