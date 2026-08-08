@@ -3,7 +3,6 @@ import { t } from "../i18n";
 import { createPixPayment, getPaymentStatus, getRaffle, type PublicRaffle } from "../api";
 import lionImg from "../assets/lion.png";
 import { buildFooter } from "./footer";
-import { prizeAmountOf } from "../../server/money";
 
 const POLL_MS = 3000;
 
@@ -244,7 +243,8 @@ export class RifaOverlay {
     };
     mk(L.availableName, `${available} ${L.freeNumbers}`, "text");
     mk(L.soldName, `${sold}/${raffle.ticketCount}`, "blue");
-    const totalPrize = prizeAmountOf(raffle.price, raffle.ticketCount);
+    // Prize at full sell-out = 70% of all tickets (mirrors server/money.ts).
+    const totalPrize = Math.round(raffle.ticketCount * raffle.price * 0.7 * 100) / 100;
     mk(L.prizeAmountName, L.money(totalPrize, raffle.currency), "gold");
     mk(L.raisedName, L.money(raised, raffle.currency), "text");
     if (raffle.drawDate) {
