@@ -583,6 +583,9 @@ select.input {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* On medium screens the center column is narrow; wrap instead of
+     overflowing so name / email / buy button always stay inside. */
+  flex-wrap: wrap;
 }
 
 .buy-count {
@@ -594,6 +597,9 @@ select.input {
 .buy-name {
   flex: 1;
   max-width: 260px;
+  /* Inputs otherwise refuse to shrink below their intrinsic (size-based)
+     width, blowing the buy bar past the panel edge on medium screens. */
+  min-width: 0;
 }
 
 .modal {
