@@ -348,9 +348,8 @@ export class RifaOverlay {
       cells.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     });
 
-    // buy bar — name, email + selected count
+    // buy bar — name + email + buy button
     const bar = this.el("div", "buybar");
-    bar.appendChild(this.el("span", "buy-count", `${L.soldName}: ${this.selSet.size}`));
 
     const nameInput = this.el("input", "input buy-name");
     nameInput.placeholder = L.buyNamePh;
