@@ -88,9 +88,24 @@ body {
 
 .title-group {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  text-align: center;
+  gap: 12px;
+  text-align: left;
+}
+
+/* Lion lockup: image beside the brand text (the lion PNG is portrait, so a
+   column stack would overflow the fixed-height top bar). */
+.logo {
+  height: 64px;
+  width: auto;
+  filter: drop-shadow(0 0 14px rgba(255, 180, 36, 0.55));
+}
+
+.title-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .brand {
@@ -908,6 +923,10 @@ select.input {
     font-size: 15px;
   }
 
+  .logo {
+    height: 40px;
+  }
+
   .brand {
     font-size: 22px;
   }
@@ -959,6 +978,14 @@ select.input {
   .topbar {
     height: 76px;
     padding: 0 8px;
+  }
+
+  .logo {
+    height: 28px;
+  }
+
+  .title-group {
+    gap: 8px;
   }
 
   .brand {

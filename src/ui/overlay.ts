@@ -168,10 +168,16 @@ export class RifaOverlay {
     supportBtn.textContent = "💬";
 
     const titleGroup = this.el("div", "title-group");
+    const logo = this.el("img", "logo");
+    logo.src = lionImg;
+    logo.alt = "";
+    const titleText = this.el("div", "title-text");
     const brand = this.el("div", "brand", L.brand);
     const tagline = this.el("div", "tagline", L.tagline);
-    titleGroup.appendChild(brand);
-    titleGroup.appendChild(tagline);
+    titleText.appendChild(brand);
+    titleText.appendChild(tagline);
+    titleGroup.appendChild(logo);
+    titleGroup.appendChild(titleText);
 
     topBar.appendChild(titleGroup);
 
