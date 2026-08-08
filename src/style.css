@@ -248,6 +248,59 @@ body {
   }
 }
 
+/* Floating music toggle — mute/unmute the background track. Playback starts
+   muted (muted autoplay is allowed on mobile), then a tap or any first
+   gesture unmutes it. Sits above everything including payment modals. */
+.audio-btn {
+  position: fixed;
+  right: 14px;
+  bottom: 18px;
+  z-index: 9999;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(10, 5, 24, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #6a5288;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s, background 0.15s, color 0.15s, box-shadow 0.2s;
+}
+
+.audio-btn:hover {
+  background: rgba(10, 5, 24, 0.9);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.audio-btn:active {
+  transform: scale(0.9);
+}
+
+.audio-btn.on {
+  color: #ffca55;
+}
+
+/* Soft golden pulse while muted and waiting for the first interaction. */
+.audio-btn.pulse {
+  animation: audio-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes audio-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 202, 85, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(255, 202, 85, 0.28);
+  }
+}
+
 .panel {
   position: absolute;
   background: rgba(27, 13, 56, 0.96);

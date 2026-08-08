@@ -1,23 +1,28 @@
-// Background music via the Web Audio API — the pattern that actually works on
-// mobile browsers:
-//   * Desktop: AudioContext starts in the "running" state -> play immediately.
-//   * Mobile:  starts "suspended" -> playback is unlocked by ctx.resume()
-//              inside the first user gesture (tap / click / keydown).
-// Decoded through fetch + decodeAudioData + AudioBufferSourceNode, so no
-// <audio> autoplay policy is involved at all.
+// Background music via a real <audio> element using the muted-autoplay trick
+// (the pattern that actually works on mobile):
+//   * Muted autoplay is ALWAYS permitted on mobile browsers (iOS/Android), so
+//     playback starts immediately — no AudioContext "resume inside a tap"
+//     dance and no "audio only starts after the first tap" gating.
+//   * We begin muted and un-mute on the first user interaction (tap, click,
+//     drag, scroll or key). If none arrives within 1s we un-mute anyway.
 import bgAudioMp3 from "./assets/audio.mp3";
 
 // Every .opus file under src/assets/ becomes a playlist entry (shuffled).
-// Drop more files into src/assets/ to grow the rotation automatically.
+// Drop more files in to grow the rotation. The MP3 is the decode fallback for
+// browsers that cannot play WebM/Opus.
 const trackModules = import.meta.glob<string>("./assets/*.opus", {
   eager: true,
   query: "?url",
   import: "default",
 });
 
-// The MP3 copy is a decode fallback: some browsers (older iOS Safari) cannot
-// decode WebM/Opus through decodeAudioData even though they could play MP3.
-const fallbackSources: string[] = [bgAudioMp3];
+const OPUS = shuffle(Object.values(trackModules));
+const sources: string[] = OPUS.length ? [...OPUS, bgAudioMp3] : [bgAudioMp3];
+
+let audio: HTMLAudioElement | null = null;
+let idx = 0;
+let muted = true;
+let firstInteraction = true;
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -28,89 +33,38 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-const audioTracks = shuffle(Object.values(trackModules));
-
-let ctx: AudioContext | null = null;
-function getCtx(): AudioContext {
-  if (!ctx) ctx = new AudioContext();
-  return ctx;
+function playUrl(): void {
+  if (!audio) return;
+  audio.src = sources[idx % sources.length];
+  audio.load();
+  audio.play().catch(() => {});
 }
 
-// Decoded buffers are cached per URL so a looping playlist never re-fetches
-// or re-decodes the same track.
-const bufferCache = new Map<string, Promise<AudioBuffer>>();
-
-let sourceRef: AudioBufferSourceNode | null = null;
-let idxRef = 0;
-let playingRef = false;
-let startedRef = false; // true once any audio has actually started
-
-function decode(url: string): Promise<AudioBuffer> {
-  let p = bufferCache.get(url);
-  if (!p) {
-    p = (async () => {
-      const resp = await fetch(url);
-      const arrayBuffer = await resp.arrayBuffer();
-      return getCtx().decodeAudioData(arrayBuffer);
-    })();
-    bufferCache.set(url, p);
-  }
-  return p;
+function nextTrack(): void {
+  idx = (idx + 1) % sources.length;
+  playUrl();
 }
 
-async function playTrack(): Promise<void> {
-  if (playingRef) return;
-  playingRef = true;
+// idx of the first source in the current failure streak (-1 = none). If every
+// source fails in a row we give up instead of churning media-error events and
+// network requests forever on a device that cannot play any of the formats.
+let failureStart = -1;
 
-  const url = audioTracks[idxRef];
-  const context = getCtx();
-
-  // Try the opus track first, then the mp3 fallback, then move on.
-  let buffer: AudioBuffer | null = null;
-  for (const candidate of url ? [url, ...fallbackSources] : fallbackSources) {
-    try {
-      buffer = await decode(candidate);
-      if (buffer) break;
-    } catch {
-      // try the next source
-    }
-  }
-  if (!buffer) {
-    playingRef = false;
+function onSourceError(): void {
+  if (failureStart === -1) failureStart = idx;
+  idx = (idx + 1) % sources.length;
+  if (idx === failureStart) {
+    // Wrapped all the way back: nothing can play here — stop retrying.
+    failureStart = -1;
     return;
   }
-
-  try {
-    sourceRef?.stop();
-  } catch {
-    /* already stopped */
-  }
-  sourceRef?.disconnect();
-
-  const source = context.createBufferSource();
-  source.buffer = buffer;
-
-  const gain = context.createGain();
-  gain.gain.value = 0.4;
-
-  source.connect(gain);
-  gain.connect(context.destination);
-  source.start(0);
-  sourceRef = source;
-  startedRef = true;
-  playingRef = false;
-
-  source.onended = () => {
-    if (audioTracks.length > 1) {
-      idxRef = (idxRef + 1) % audioTracks.length;
-    }
-    playTrack();
-  };
+  playUrl();
 }
 
 // Everything that can count as a first user interaction. Drags are covered by
-// the touch/move/up + wheel chain; scroll covers momentum scrolling that fires
-// after the finger lifts. All are passive so they never block scrolling.
+// the touch/move/up + pointer/mouse chain; scroll catches momentum scrolling
+// that fires after the finger lifts. All are passive so they never block
+// scrolling.
 const GESTURES = [
   "click",
   "keydown",
@@ -124,30 +78,74 @@ const GESTURES = [
   "wheel",
 ] as const;
 
+function setMuted(next: boolean): void {
+  muted = next;
+  if (audio) audio.muted = next;
+  updateButton();
+}
+
 function unlock(): void {
   for (const ev of GESTURES) {
     window.removeEventListener(ev, unlock);
   }
   // Scroll doesn't bubble, so it's captured on the document instead.
   document.removeEventListener("scroll", unlock, { capture: true });
-  // Desktop autoplay already has music going: nothing to do but clean up.
-  if (startedRef) return;
-  const c = getCtx();
-  if (c.state === "suspended") {
-    c.resume().then(() => playTrack()).catch(() => {});
-  } else {
-    playTrack();
-  }
+  firstInteraction = false;
+  if (audio?.muted) setMuted(false);
+  else updateButton(); // already audible — just refresh the button state
+}
+
+/** Toggle mute state. Returns the new muted state. */
+export function toggleAudio(): boolean {
+  if (firstInteraction) unlock();
+  else setMuted(!muted);
+  return muted;
+}
+
+// ---------- floating mute/unmute toggle ----------
+
+let btn: HTMLButtonElement | null = null;
+
+function updateButton(): void {
+  if (!btn) return;
+  btn.textContent = muted ? "🔇" : "🔊";
+  btn.classList.toggle("on", !muted);
+  btn.classList.toggle("pulse", muted && firstInteraction);
+}
+
+function mountButton(): void {
+  if (btn) return;
+  btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "audio-btn pulse";
+  btn.title = "Music / Música";
+  btn.setAttribute("aria-label", "Toggle background music");
+  btn.addEventListener("click", () => toggleAudio());
+  updateButton();
+  document.body.appendChild(btn);
 }
 
 export function startBackgroundAudio(): void {
-  // Desktop: AudioContext starts "running" -> play immediately.
-  // Mobile: starts "suspended" -> wait for the first interaction.
-  if (getCtx().state === "running") {
-    playTrack();
-  }
+  audio = new Audio();
+  audio.preload = "auto";
+  audio.volume = 0.5;
+  audio.muted = true; // muted autoplay is permitted on every browser
+  audio.addEventListener("ended", nextTrack);
+  audio.addEventListener("error", onSourceError);
+
+  // Start on a random track so repeat visits don't begin with the same song.
+  idx = Math.floor(Math.random() * sources.length);
+  playUrl();
+
   for (const ev of GESTURES) {
     window.addEventListener(ev, unlock, { passive: true });
   }
   document.addEventListener("scroll", unlock, { capture: true, passive: true });
+
+  // No interaction within 1s? Un-mute anyway (mirrors the Svelte reference).
+  window.setTimeout(() => {
+    if (firstInteraction) unlock();
+  }, 1000);
+
+  mountButton();
 }

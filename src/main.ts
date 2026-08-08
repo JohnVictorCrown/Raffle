@@ -11,8 +11,10 @@ mount.innerHTML = `
   </div>
 `;
 
-// Background music via the Web Audio API (see background-audio.ts): desktop
-// starts immediately, mobile unlocks on the first tap.
+// Background music via a real <audio muted autoplay> element (see
+// background-audio.ts): playback starts muted — allowed on mobile — and
+// unmutes on the first tap/click/drag/scroll or after 1s. Also mounts the
+// floating mute toggle.
 startBackgroundAudio();
 
 const uiSlot = document.getElementById("ui")!;
