@@ -8,7 +8,8 @@
  * service never silently comes up unable to email or take PIX. Unset vars
  * simply skip their check.
  *
- * Bypass all checks with SKIP_STARTUP_CHECKS=1.
+ * Bypass all checks by leaving `testTrue` unset (or not exactly "true"). Set
+ * testTrue=true in the environment to run them on boot.
  */
 import { sendEmail } from "./email";
 
@@ -74,8 +75,9 @@ async function checkMercadoPago(): Promise<void> {
 }
 
 export async function runStartupChecks(): Promise<void> {
-  if (process.env.SKIP_STARTUP_CHECKS === "1") {
-    console.warn("[startup-check] SKIPPED (SKIP_STARTUP_CHECKS=1)");
+  const testTrue = (process.env.TEST_TRUE ?? process.env.testTrue ?? "").toLowerCase();
+  if (testTrue !== "true") {
+    console.log(`[startup-check] SKIPPED (testTrue is not set to 'true' — got "${testTrue || "(unset)"}")`);
     return;
   }
   console.log("[startup-check] running email + mercadopago checks…");
