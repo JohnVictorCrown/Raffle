@@ -1,12 +1,14 @@
 /**
  * Startup dependency checks ("fail fast").
  *
- * On boot we verify the two external integrations the app depends on to
- * actually function — Gmail SMTP and Mercado Pago — and abort (process.exit(1))
- * if either is broken, so a deploy is never silently serving a raffle that
- * can't email or can't take PIX.
+ * Each integration is only tested when its own env vars are configured:
+ *   - email → runs when `EMAIL` is set (needs BREVO_API_KEY or EMAIL_P)
+ *   - Mercado Pago → runs when `MP_TOKEN` is set
+ * A configured-but-broken integration aborts the deploy (process.exit(1)) so a
+ * service never silently comes up unable to email or take PIX. Unset vars
+ * simply skip their check.
  *
- * Bypass with SKIP_STARTUP_CHECKS=1 if you need to boot anyway.
+ * Bypass all checks with SKIP_STARTUP_CHECKS=1.
  */
 import { sendEmail } from "./email";
 
@@ -27,10 +29,11 @@ async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<
 async function checkEmail(): Promise<void> {
   const to = process.env.EMAIL;
   if (!to) {
-    fail(`EMAIL is not configured (email will not send).`);
+    console.log("[startup-check] email check SKIPPED (EMAIL not set)");
+    return;
   }
   if (!process.env.BREVO_API_KEY && !process.env.EMAIL_P) {
-    fail(`no email transport configured: set BREVO_API_KEY (or EMAIL / EMAIL_P for SMTP).`);
+    fail(`EMAIL is set but no transport configured: set BREVO_API_KEY (or EMAIL_P for SMTP).`);
   }
   const ok = await withTimeout(
     sendEmail(to, "Rifa — startup email check", "This is an automated startup check. Emails are working ✓"),
@@ -47,7 +50,8 @@ async function checkEmail(): Promise<void> {
 async function checkMercadoPago(): Promise<void> {
   const token = process.env.MP_TOKEN;
   if (!token) {
-    fail(`MP_TOKEN is not configured (Mercado Pago PIX will not work).`);
+    console.log("[startup-check] mercadopago check SKIPPED (MP_TOKEN not set)");
+    return;
   }
   let status = 0;
   try {
